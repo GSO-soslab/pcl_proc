@@ -135,7 +135,7 @@ def calculate_slope(x_coords:list, y_coords:list):
     s_xy = sum([(x - np.mean(x_coords))*(y - np.mean(y_coords)) for x,y in zip(x_coords,y_coords)])
     
     # print(s_xx, s_yy, s_xy)
-    if s_xx > s_yy:
+    if s_xx >= s_yy:
         beta_1 = s_xy/s_xx
         beta_0 = np.mean(y_coords) - beta_1*np.mean(x_coords)
         return beta_1, beta_0
