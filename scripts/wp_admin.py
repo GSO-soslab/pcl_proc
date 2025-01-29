@@ -157,7 +157,7 @@ class Wp_Admin:
                     
                     #Feed best point.
                     if(time.time() - self.follow_mode_timer) < self.follow_mode_timer_param:
-                        rospy.loginfo("Following Mode")
+                        rospy.loginfo_throttle(3, "Following Mode")
                         self.bool_search_mode = False
                         wp.polygon.points.append(Point32(self.x ,self.y, self.depth))
                         self.pub_update.publish(wp)
@@ -254,6 +254,7 @@ class Wp_Admin:
         request = ChangeStateRequest("survey_3d", self.node_name)
         response = service_client_change_state(request)
         self.pub_update.publish(wp)
+        rospy.loginfo_throttle(3, "Search Mode")
         time.sleep(1)
 
     def iceberg_reacquisition_mode(self, wp):
@@ -276,7 +277,7 @@ class Wp_Admin:
         #Append the waypoints
         for i in range(len(corner_bhvr_points)):
             wp.polygon.points.append(Point32(corner_bhvr_points[i].point.x ,corner_bhvr_points[i].point.y, self.depth))
-        rospy.loginfo("Iceberg Reacquisition Mode")
+        rospy.loginfo_throttle(3,"Iceberg Reacquisition Mode")
         self.pub_update.publish(wp)
 
     def check_state(self):
