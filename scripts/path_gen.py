@@ -155,7 +155,7 @@ class PathGen:
             ## Compare the Canny and Custom
             compare_path = path_utils.compare_two_lists(raw_pixels, path_odom_frame, self.height, self.width)
             viz_edges = path_utils.compare_two_lists(raw_pixels, edge, self.height, self.width)
-            compare_edge = path_utils.compare_points_with_image(vx_frame_image_copy, path_cells)
+            compare_edge = path_utils.compare_points_with_image(vx_frame_image_copy, np.int_(path_cells))
 
             mix= np.hstack((data, dilate,canny_image, viz_edges, compare_path, compare_edge))
             image_msg = self.bridge.cv2_to_imgmsg(mix)
