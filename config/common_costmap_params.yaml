@@ -2,7 +2,7 @@
 global_frame: alpha_rise/odom
 robot_base_frame: alpha_rise/base_link
 transform_tolerance: 2.0
-update_frequency: 10.0
+update_frequency: 5.0
 static_map: false
 rolling_window: true
 always_send_full_costmap: true
