@@ -665,7 +665,7 @@ class PathGen:
         if self.vx_z < -(math.tan(math.radians(12.5)) * self.distance_in_meters): #-2:
             if shifted_coordinates!= None:
                 if shifted_coordinates!= -1:
-                    rospy.loginfo_once(f"Desired depth achieved")
+                    rospy.loginfo_throttle(3, f"Desired depth achieved, Path published")
                     path = Path()
                     path.header.frame_id = self.frame
                     path.header.stamp =  self.time

@@ -22,7 +22,7 @@ class Wp_Admin:
         """
         Constructer. Init all pubs, subs, variables
         """
-        self.distance_in_meters = rospy.get_param("path_generator/standoff_distance_meters",15)
+        self.standoff_distance_in_meters = rospy.get_param("path_generator/standoff_distance_meters",15)
         update_waypoint_topic = rospy.get_param("waypoint_admin/update_waypoint_topic")
         path_topic = rospy.get_param("path_generator/path_topic")
 
@@ -35,7 +35,10 @@ class Wp_Admin:
 
         #Waypoint selection param
         self.update_rate = rospy.get_param("waypoint_admin/check_state_update_rate")
-        self.depth = rospy.get_param("waypoint_admin/z_value")
+        self.depth = rospy.get_param("waypoint_admin/fls_beamwidth")
+        
+        #To remove surface reflections from FLS, this is the min depth, the vehicle must be at.
+        self.depth = math.tan(math.radians(self.depth)) * self.standoff_distance_in_meters
 
         self.search_mode_initial_radius = rospy.get_param("waypoint_admin/search_mode_initial_radius", 10)
 
@@ -208,9 +211,9 @@ class Wp_Admin:
         exit_point = PointStamped()
         exit_point.point.x = 0
         if vx_to_line_frame_tf.transform.translation.y > 0:
-            exit_point.point.y = self.exit_mode_distance + self.distance_in_meters
+            exit_point.point.y = self.exit_mode_distance + self.standoff_distance_in_meters
         else:
-            exit_point.point.y = -self.exit_mode_distance - self.distance_in_meters
+            exit_point.point.y = -self.exit_mode_distance - self.standoff_distance_in_meters
             
         exit_point_odom_frame = tf2_geometry_msgs.do_transform_point(exit_point, line_frame_to_odom_tf)
 
@@ -267,12 +270,12 @@ class Wp_Admin:
         request = ChangeStateRequest("survey_3d", self.node_name)
         response = service_client_change_state(request)
         #The center point of the circle in vx frame
-        point_of_obstacle = [self.reacquision_s_param*self.distance_in_meters, -self.distance_in_meters]
+        point_of_obstacle = [self.reacquision_s_param*self.standoff_distance_in_meters, -self.standoff_distance_in_meters]
         corner_bhvr_points = self.draw_arc(number_of_points=self.n_points, 
                                                    start_angle=math.pi/2, 
                                                    end_angle=0,
                                                    center=point_of_obstacle,
-                                                   radius = self.distance_in_meters)
+                                                   radius = self.standoff_distance_in_meters)
     
         #Append the waypoints
         for i in range(len(corner_bhvr_points)):
