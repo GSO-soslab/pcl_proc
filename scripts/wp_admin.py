@@ -38,7 +38,7 @@ class Wp_Admin:
         self.depth = rospy.get_param("waypoint_admin/fls_beamwidth")
         
         #To remove surface reflections from FLS, this is the min depth, the vehicle must be at.
-        self.depth = math.tan(math.radians(self.depth)) * self.standoff_distance_in_meters
+        self.depth = -math.tan(math.radians(self.depth)) * self.standoff_distance_in_meters
 
         self.search_mode_initial_radius = rospy.get_param("waypoint_admin/search_mode_initial_radius", 10)
 
