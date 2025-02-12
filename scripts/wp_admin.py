@@ -220,7 +220,7 @@ class Wp_Admin:
         wp.polygon.points.append(Point32(exit_point_odom_frame.point.x, exit_point_odom_frame.point.y, 0))
         self.pub_update.publish(wp)
         time.sleep(10)
-        rospy.signal_shutdown(f"Follow Mode completed. Timeout of {self.follow_mode_timer_param}s.Starting course away from the iceberg")
+        rospy.signal_shutdown(f"Follow Mode completed. Timeout of {self.follow_mode_timer_param}s.Starting course away from the iceberg to {exit_point_odom_frame.point}")
 
 
     def searching_mode(self, wp):

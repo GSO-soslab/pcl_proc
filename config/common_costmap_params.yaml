@@ -50,7 +50,7 @@ obstacles:
     #The maximum height in meters of a sensor reading considered valid. 
     max_obstacle_height: 5,
     #The minimum height in meters of a sensor reading considered valid
-    min_obstacle_height: -10,
+    min_obstacle_height: -20,
     obstacle_range: 50,
     raytrace_range: 50
   }
