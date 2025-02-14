@@ -9,7 +9,7 @@ always_send_full_costmap: true
 #The dimensions of the costmap(cells) is width(m) * 1/resolution(m/cell) x height(m) * 1/resolution(m/cell)  
 width: 100.0
 height: 100.0 #100x100 for sf #20x20 for real # 2*number of bins or 2*range
-resolution: 0.5 #meters per cell #0.05 for real. #0.5 for sf
+resolution: 1 #0.5 #meters per cell #0.05 for real. #0.5 for sf
 
 plugins:
   - {name: obstacles, type: "costmap_2d::ObstacleLayer"}
