@@ -22,34 +22,34 @@ class Wp_Admin:
         """
         Constructer. Init all pubs, subs, variables
         """
-        self.standoff_distance_in_meters = rospy.get_param("path_generator/standoff_distance_meters",15)
-        update_waypoint_topic = rospy.get_param("waypoint_admin/update_waypoint_topic")
-        path_topic = rospy.get_param("path_generator/path_topic")
+        self.standoff_distance_in_meters = rospy.get_param("~path_generator/standoff_distance_meters",15)
+        update_waypoint_topic = rospy.get_param("~waypoint_admin/update_waypoint_topic")
+        path_topic = rospy.get_param("~waypoint_admin/path_topic", "/alpha_rise/path")
 
-        self.get_state_service = rospy.get_param("waypoint_admin/get_state_service", "/alpha_rise/helm/get_state")
-        self.change_state_service = rospy.get_param("waypoint_admin/change_state_service", "/alpha_rise/helm/change_state")
-        self.get_waypoint_service = rospy.get_param("waypoint_admin/get_waypoint", "/alpha_rise/helm/path_3d/get_next_waypoints")
-        self.n_points = rospy.get_param("path_generator/points_to_sample_from_curve",20)
-        self.reacquision_s_param = rospy.get_param("waypoint_admin/reacquision_s_param",0.5)
+        self.get_state_service = rospy.get_param("~waypoint_admin/get_state_service", "/alpha_rise/helm/get_state")
+        self.change_state_service = rospy.get_param("~waypoint_admin/change_state_service", "/alpha_rise/helm/change_state")
+        self.get_waypoint_service = rospy.get_param("~waypoint_admin/get_waypoint", "/alpha_rise/helm/path_3d/get_next_waypoints")
+        self.n_points = rospy.get_param("~path_generator/points_to_sample_from_curve",20)
+        self.reacquision_s_param = rospy.get_param("~waypoint_admin/reacquision_s_param",0.5)
 
 
         #Waypoint selection param
-        self.update_rate = rospy.get_param("waypoint_admin/check_state_update_rate")
-        self.depth = rospy.get_param("waypoint_admin/fls_beamwidth")
+        self.update_rate = rospy.get_param("~waypoint_admin/check_state_update_rate")
+        self.depth = rospy.get_param("~waypoint_admin/fls_beamwidth")
         
         #To remove surface reflections from FLS, this is the min depth, the vehicle must be at.
         self.depth = -math.tan(math.radians(self.depth)) * self.standoff_distance_in_meters
 
-        self.search_mode_initial_radius = rospy.get_param("waypoint_admin/search_mode_initial_radius", 10)
+        self.search_mode_initial_radius = rospy.get_param("~waypoint_admin/search_mode_initial_radius", 10)
 
         #Timers
-        self.search_mode_timer_param = rospy.get_param("waypoint_admin/search_mode_timer")
+        self.search_mode_timer_param = rospy.get_param("~waypoint_admin/search_mode_timer")
         self.search_mode_timer = time.time()
         
-        self.follow_mode_timer_param = rospy.get_param("waypoint_admin/follow_mode_timer")
+        self.follow_mode_timer_param = rospy.get_param("~waypoint_admin/follow_mode_timer")
         self.follow_flag = 0
 
-        self.exit_mode_distance = rospy.get_param("waypoint_admin/exit_mode_distance")
+        self.exit_mode_distance = rospy.get_param("~waypoint_admin/exit_mode_distance")
 
 
         #Declare Pubs
@@ -151,6 +151,8 @@ class Wp_Admin:
                     n_points_above_vx += 1 
 
             if self.state == "survey_3d":
+                # print(n_points_above_vx)
+
                 if msg.poses != self.poses:
                     
                     #grab time of follow_mode initializing
@@ -174,7 +176,7 @@ class Wp_Admin:
 
             #Iceberg Reacquisition Mode is when 
             #the vehicle reaches end of a valid path.
-            elif n_points_above_vx <= 2: #self.state == "start":     
+            elif n_points_above_vx <= 3: #self.state == "start":     
                 self.iceberg_reacquisition_mode(wp)
         
         #Path is still published when no costmap. But the n_points is 1 (vx_x, vx_y)
@@ -191,8 +193,9 @@ class Wp_Admin:
                     service_client_change_state = rospy.ServiceProxy(self.change_state_service, ChangeState)
                     request = ChangeStateRequest("start", self.node_name)
                     response = service_client_change_state(request)
+                    rospy.loginfo(f"Search Mode Took too long")
                     rospy.signal_shutdown("Search Mode Took too long")
-
+        
     def exit_sequence(self, wp):
         """
         Function to navigate the vehicle 

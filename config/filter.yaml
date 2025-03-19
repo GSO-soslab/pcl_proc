@@ -1,11 +1,11 @@
 pcl_filter:
-  stonefish: true
+  stonefish: false
   sf_sub_topic: 'msis/stonefish/data/pointcloud'
   sf_radial_filter_param: 2 #meters
   sf_std_dev_multiplier: 1
   sf_pub_topic: 'msis/stonefish/data/pointcloud/filtered'
 
-  sub_topic: 'msis/pointcloud'
+  sub_topic: 'pointcloud'
   radial_filter_param: 2 #2meters.
-  std_dev_multiplier: 2.25
+  std_dev_multiplier: 3
   pub_topic: 'msis/pointcloud/filtered'

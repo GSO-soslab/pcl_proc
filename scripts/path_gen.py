@@ -23,27 +23,27 @@ from sensor_msgs.msg import Image
 class PathGen:
     def __init__(self) -> None:
         #Get params
-        self.odom_frame = rospy.get_param("path_generator/odom_frame","alpha_rise/odom")
-        self.base_frame = rospy.get_param("path_generator/base_frame","alpha_rise/base_link")
+        self.odom_frame = rospy.get_param("~path_generator/odom_frame","alpha_rise/odom")
+        self.base_frame = rospy.get_param("~path_generator/base_frame","alpha_rise/base_link")
 
         #Debug
-        self.debug = rospy.get_param("path_generator/debug",False)
+        self.debug = rospy.get_param("~path_generator/debug",False)
 
-        costmap_topic = rospy.get_param("path_generator/costmap_topic")
-        path_topic = rospy.get_param("path_generator/path_topic")
+        costmap_topic = rospy.get_param("~path_generator/costmap_topic")
+        path_topic = rospy.get_param("~path_generator/path_topic")
 
-        self.canny_min = rospy.get_param("path_generator/canny_min_threshold",200)
-        self.canny_max = rospy.get_param("path_generator/canny_max_threshold",255)
+        self.canny_min = rospy.get_param("~path_generator/canny_min_threshold",200)
+        self.canny_max = rospy.get_param("~path_generator/canny_max_threshold",255)
 
-        self.distance_in_meters = rospy.get_param("path_generator/standoff_distance_meters",15)
-        self.n_points = rospy.get_param("path_generator/points_to_sample_from_curve",20)
+        self.distance_in_meters = rospy.get_param("~path_generator/standoff_distance_meters",15)
+        self.n_points = rospy.get_param("~path_generator/points_to_sample_from_curve",20)
 
-        self.min_scan_angle = rospy.get_param("path_generator/min_scan_angle",-90)
-        self.max_scan_angle = rospy.get_param("path_generator/max_scan_angle",90)
-        self.distance_constraint = rospy.get_param("path_generator/distance_constraint",90)
+        self.min_scan_angle = rospy.get_param("~path_generator/min_scan_angle",-90)
+        self.max_scan_angle = rospy.get_param("~path_generator/max_scan_angle",90)
+        self.distance_constraint = rospy.get_param("~path_generator/distance_constraint",15)
         
-        self.max_surge = rospy.get_param("helm/path_3d/surge_velocity", 0.8)
-        self.max_yaw_rate = rospy.get_param("waypoint_admin/max_yaw_rate")
+        self.max_surge = rospy.get_param("~helm/path_3d/surge_velocity", 0.8)
+        self.max_yaw_rate = rospy.get_param("~path_generator/max_yaw_rate")
 
         #Costmap subscriber.
         rospy.Subscriber(costmap_topic, OccupancyGrid, self.mapCB)

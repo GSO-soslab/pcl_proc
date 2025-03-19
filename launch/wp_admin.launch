@@ -1,4 +1,6 @@
 <launch>
        <arg name="robot_name" default="alpha_rise"/>
-       <node ns="$(arg robot_name)" pkg="pcl_proc" type="wp_admin.py" name = "waypoint_administrator" output="screen"/>
+       <node ns="$(arg robot_name)" pkg="pcl_proc" type="wp_admin.py" name = "waypoint_administrator" output="screen">
+       <rosparam command="load" file="$(find pcl_proc)/config/wp_admin.yaml"/>
+       </node>
 </launch>
