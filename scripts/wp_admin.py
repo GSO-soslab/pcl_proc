@@ -22,15 +22,17 @@ class Wp_Admin:
         """
         Constructer. Init all pubs, subs, variables
         """
-        self.standoff_distance_in_meters = rospy.get_param("~path_generator/standoff_distance_meters",15)
+        standoff_distance_in_meters = rospy.get_param("~waypoint_admin/stand_off_distance_param")
+        self.standoff_distance_in_meters = rospy.get_param(standoff_distance_in_meters)
         update_waypoint_topic = rospy.get_param("~waypoint_admin/update_waypoint_topic")
         path_topic = rospy.get_param("~waypoint_admin/path_topic", "/alpha_rise/path")
 
         self.get_state_service = rospy.get_param("~waypoint_admin/get_state_service", "/alpha_rise/helm/get_state")
         self.change_state_service = rospy.get_param("~waypoint_admin/change_state_service", "/alpha_rise/helm/change_state")
         self.get_waypoint_service = rospy.get_param("~waypoint_admin/get_waypoint", "/alpha_rise/helm/path_3d/get_next_waypoints")
-        self.n_points = rospy.get_param("~path_generator/points_to_sample_from_curve",20)
-        self.reacquision_s_param = rospy.get_param("~waypoint_admin/reacquision_s_param",0.5)
+        n_points = rospy.get_param("~waypoint_admin/n_points_param")
+        self.n_points = rospy.get_param(n_points)
+        self.reacquision_s_param = rospy.get_param("~waypoint_admin/reacquisition_s_param")
 
 
         #Waypoint selection param
@@ -40,7 +42,7 @@ class Wp_Admin:
         #To remove surface reflections from FLS, this is the min depth, the vehicle must be at.
         self.depth = -math.tan(math.radians(self.depth)) * self.standoff_distance_in_meters
 
-        self.search_mode_initial_radius = rospy.get_param("~waypoint_admin/search_mode_initial_radius", 10)
+        self.search_mode_initial_radius = rospy.get_param("~waypoint_admin/search_mode_initial_radius")
 
         #Timers
         self.search_mode_timer_param = rospy.get_param("~waypoint_admin/search_mode_timer")

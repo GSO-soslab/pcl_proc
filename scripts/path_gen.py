@@ -27,22 +27,31 @@ class PathGen:
         self.base_frame = rospy.get_param("~path_generator/base_frame","alpha_rise/base_link")
 
         #Debug
-        self.debug = rospy.get_param("~path_generator/debug",False)
+        self.debug = rospy.get_param("~path_generator/debug")
+        
+        enable_search_mode = rospy.get_param("~path_generator/enable_search_mode")
 
         costmap_topic = rospy.get_param("~path_generator/costmap_topic")
         path_topic = rospy.get_param("~path_generator/path_topic")
 
-        self.canny_min = rospy.get_param("~path_generator/canny_min_threshold",200)
-        self.canny_max = rospy.get_param("~path_generator/canny_max_threshold",255)
+        self.canny_min = rospy.get_param("~path_generator/canny_min_threshold")
+        self.canny_max = rospy.get_param("~path_generator/canny_max_threshold")
 
-        self.distance_in_meters = rospy.get_param("~path_generator/standoff_distance_meters",15)
-        self.n_points = rospy.get_param("~path_generator/points_to_sample_from_curve",20)
+        msis_vertical_beamwidth = rospy.get_param("~path_generator/msis_vertical_beamwidth")
 
-        self.min_scan_angle = rospy.get_param("~path_generator/min_scan_angle",-90)
-        self.max_scan_angle = rospy.get_param("~path_generator/max_scan_angle",90)
-        self.distance_constraint = rospy.get_param("~path_generator/distance_constraint",15)
+        self.distance_in_meters = rospy.get_param("~path_generator/standoff_distance_meters")
+        self.n_points = rospy.get_param("~path_generator/points_to_sample_from_curve")
+
+        if enable_search_mode:
+            self.minimum_depth_for_path = -(math.tan(math.radians(msis_vertical_beamwidth/2)) * self.distance_in_meters)
+        else:
+            self.minimum_depth_for_path = 0
+
+        self.min_scan_angle = rospy.get_param("~path_generator/min_scan_angle",)
+        self.max_scan_angle = rospy.get_param("~path_generator/max_scan_angle")
+        self.distance_constraint = rospy.get_param("~path_generator/distance_constraint")
         
-        self.max_surge = rospy.get_param("~helm/path_3d/surge_velocity", 0.8)
+        self.max_surge = rospy.get_param("~path_generator/surge_velocity")
         self.max_yaw_rate = rospy.get_param("~path_generator/max_yaw_rate")
 
         #Costmap subscriber.
@@ -662,10 +671,10 @@ class PathGen:
         Args:
             shifted_coordinates: List of fitted points in odom relative costmap image
         """
-        if self.vx_z < -(math.tan(math.radians(12.5)) * self.distance_in_meters): #-2:
+        if self.vx_z <= self.minimum_depth_for_path:
             if shifted_coordinates!= None:
                 if shifted_coordinates!= -1:
-                    rospy.loginfo_throttle(3, f"Desired depth achieved, Path published")
+                    # rospy.loginfo_throttle(3, f"Desired depth achieved, Path published")
                     path = Path()
                     path.header.frame_id = self.frame
                     path.header.stamp =  self.time
@@ -764,7 +773,7 @@ class PathGen:
                 path.poses.append(pose_stamped)
                 self.pub_path.publish(path)
         else: # depth greater than -2
-            rospy.loginfo_throttle(3, f"Desired depth: {round(-(math.tan(math.radians(12.5)) * self.distance_in_meters))}, Current Depth: {round(self.vx_z)}")
+            # rospy.loginfo_throttle(3, f"Desired depth: {round(-(math.tan(math.radians(12.5)) * self.distance_in_meters))}, Current Depth: {round(self.vx_z)}")
             path = Path()
             path.header.frame_id = self.frame
             path.header.stamp =  self.time
