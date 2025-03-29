@@ -9,24 +9,14 @@ from math import nan
 class Processing:
     def __init__(self) -> None:
         # Subscribe to the PointCloud2 topic
-        is_stonefish = rospy.get_param("~pcl_filter/stonefish", True)
-        if is_stonefish:
-            sub_topic = rospy.get_param("pcl_filter/sf_sub_topic")
-            pub_topic = rospy.get_param("pcl_filter/sf_pub_topic")
-            self.std_dev_multiplier = rospy.get_param("pcl_filter/sf_std_dev_multiplier", 2)
-            #This param is in meters.
-            self.radial_filter = rospy.get_param("pcl_filter/sf_radial_filter_param", 2)
-            range_max = rospy.get_param("stonefish/range_max", 50)
-            number_of_bins = rospy.get_param("stonefish/number_of_bins", 100)
+        sub_topic = rospy.get_param("~pcl_filter/sub_topic")
+        pub_topic = rospy.get_param("~pcl_filter/pub_topic")
+        self.std_dev_multiplier = rospy.get_param("~pcl_filter/std_dev_multiplier")
+        #This param is in meters.
+        self.radial_filter = rospy.get_param("~pcl_filter/radial_filter_param")
+        range_max = rospy.get_param("~pcl_filter/range_max")
+        number_of_bins = rospy.get_param("~pcl_filter/number_of_bins")
             
-        else:
-            sub_topic = rospy.get_param("~pcl_filter/sub_topic")
-            pub_topic = rospy.get_param("~pcl_filter/pub_topic")
-            self.std_dev_multiplier = rospy.get_param("~pcl_filter/std_dev_multiplier", 2.55)
-            #This param is in meters.
-            self.radial_filter = rospy.get_param("~pcl_filter/radial_filter_param", 2)
-            range_max = rospy.get_param("~ping360_sonar/range_max", 20)
-            number_of_bins = rospy.get_param("~ping360_sonar/number_of_bins", 1200)
         #This(bin/meter) is to compare index(bin) with radial filter param(m)
         self.bin_meter_coeff = number_of_bins/range_max
         rospy.Subscriber(sub_topic, PointCloud2, self.pointcloud_callback)
