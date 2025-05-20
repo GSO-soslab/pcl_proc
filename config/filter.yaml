@@ -1,11 +1,14 @@
-pcl_filter:
-  stonefish: false
-  sf_sub_topic: 'msis/stonefish/data/pointcloud'
-  sf_radial_filter_param: 2 #meters
-  sf_std_dev_multiplier: 1
-  sf_pub_topic: 'msis/stonefish/data/pointcloud/filtered'
+/alpha_rise/pcl_filter_node:
+  ros__parameters:
+    stonefish: true
+    sf_sub_topic: 'stonefish/msis/data/pointcloud'
+    sf_radial_filter_param: 2.0 #meters
+    sf_std_dev_multiplier: 1.0
+    sf_pub_topic: 'stonefish/msis/data/pointcloud/filtered'
+    sf_range_max: 50.0 #m
+    sf_number_of_bins: 100 #should be same as msis_pcl params
 
-  sub_topic: 'pointcloud'
-  radial_filter_param: 2 #2meters.
-  std_dev_multiplier: 3
-  pub_topic: 'msis/pointcloud/filtered'
+    sub_topic: 'pointcloud'
+    radial_filter_param: 2 #2meters.
+    std_dev_multiplier: 3
+    pub_topic: 'msis/pointcloud/filtered'

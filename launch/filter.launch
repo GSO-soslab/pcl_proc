@@ -1,5 +1,0 @@
-<launch>
-       <arg name="robot_name" default="alpha_rise"/>
-       <node ns="$(arg robot_name)" pkg="pcl_proc" type="processing.py" name = "pcl_filter_node" output="screen"/>
-       <rosparam command="load" file="$(find pcl_proc)/config/filter.yaml" ns="$(arg robot_name)"/>
-</launch>
