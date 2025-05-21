@@ -5,9 +5,12 @@
 #Generates curve, standoff curve of the iceberg from a costmap
 #tony.jacob@uri.edu
 
-import rospy
+import rclpy
+from rclpy.node import Node
+from rclpy.time import Time
+from rclpy.parameter import Parameter
 import tf2_ros
-import tf.transformations as tf_transform
+import tf_transformations as tf_transform
 from nav_msgs.msg import OccupancyGrid, Path
 from geometry_msgs.msg import PoseStamped, Point, TransformStamped
 from std_msgs.msg import Float32
@@ -15,65 +18,74 @@ import numpy as np
 import cv2
 import math
 import scipy.optimize
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 import path_utils
 import time
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 
-class PathGen:
-    def __init__(self) -> None:
-        #Get params
-        self.odom_frame = rospy.get_param("~path_generator/odom_frame","alpha_rise/odom")
-        self.base_frame = rospy.get_param("~path_generator/base_frame","alpha_rise/base_link")
+class PathGen(Node):
+    def __init__(self):
+        super().__init__('path_generator')
+        # Declare parameters 
+        self.declare_parameter('odom_frame', Parameter.Type.STRING)
+        self.declare_parameter('base_frame', Parameter.Type.STRING)
+        self.declare_parameter('debug', Parameter.Type.BOOL)
+        self.declare_parameter('enable_search_mode', Parameter.Type.BOOL)
+        self.declare_parameter('costmap_topic', Parameter.Type.STRING)
+        self.declare_parameter('path_topic', Parameter.Type.STRING)
+        self.declare_parameter('canny_min_threshold', Parameter.Type.INTEGER)
+        self.declare_parameter('canny_max_threshold', Parameter.Type.INTEGER)
+        self.declare_parameter('msis_vertical_beamwidth', Parameter.Type.INTEGER)
+        self.declare_parameter('standoff_distance_meters', Parameter.Type.DOUBLE)
+        self.declare_parameter('points_to_sample_from_curve', Parameter.Type.INTEGER)
+        self.declare_parameter('min_scan_angle', Parameter.Type.INTEGER)
+        self.declare_parameter('max_scan_angle', Parameter.Type.INTEGER)
+        self.declare_parameter('distance_constraint', Parameter.Type.DOUBLE)
+        self.declare_parameter('surge_velocity',Parameter.Type.DOUBLE)
+        self.declare_parameter('max_yaw_rate',Parameter.Type.DOUBLE)
 
-        #Debug
-        self.debug = rospy.get_param("~path_generator/debug")
-        
-        enable_search_mode = rospy.get_param("~path_generator/enable_search_mode")
-
-        costmap_topic = rospy.get_param("~path_generator/costmap_topic")
-        path_topic = rospy.get_param("~path_generator/path_topic")
-
-        self.canny_min = rospy.get_param("~path_generator/canny_min_threshold")
-        self.canny_max = rospy.get_param("~path_generator/canny_max_threshold")
-
-        msis_vertical_beamwidth = rospy.get_param("~path_generator/msis_vertical_beamwidth")
-
-        self.distance_in_meters = rospy.get_param("~path_generator/standoff_distance_meters")
-        self.n_points = rospy.get_param("~path_generator/points_to_sample_from_curve")
+        # Get parameters
+        self.odom_frame = self.get_parameter('odom_frame').get_parameter_value().string_value
+        self.base_frame = self.get_parameter('base_frame').get_parameter_value().string_value
+        self.debug = self.get_parameter('debug').get_parameter_value().bool_value
+        enable_search_mode = self.get_parameter('enable_search_mode').get_parameter_value().bool_value
+        costmap_topic = self.get_parameter('costmap_topic').get_parameter_value().string_value
+        path_topic = self.get_parameter('path_topic').get_parameter_value().string_value
+        self.canny_min = self.get_parameter('canny_min_threshold').get_parameter_value().integer_value
+        self.canny_max = self.get_parameter('canny_max_threshold').get_parameter_value().integer_value
+        msis_vertical_beamwidth = self.get_parameter('msis_vertical_beamwidth').get_parameter_value().integer_value
+        self.distance_in_meters = self.get_parameter('standoff_distance_meters').get_parameter_value().double_value
+        self.n_points = self.get_parameter('points_to_sample_from_curve').get_parameter_value().integer_value
+        self.min_scan_angle = self.get_parameter('min_scan_angle').get_parameter_value().integer_value
+        self.max_scan_angle = self.get_parameter('max_scan_angle').get_parameter_value().integer_value
+        self.distance_constraint = self.get_parameter('distance_constraint').get_parameter_value().double_value
+        self.max_surge = self.get_parameter('surge_velocity').get_parameter_value().double_value
+        self.max_yaw_rate = self.get_parameter('max_yaw_rate').get_parameter_value().double_value
 
         if enable_search_mode:
-            self.minimum_depth_for_path = -(math.tan(math.radians(msis_vertical_beamwidth/2)) * self.distance_in_meters)
+            self.minimum_depth_for_path = -(math.tan(math.radians(msis_vertical_beamwidth / 2)) * self.distance_in_meters)
         else:
             self.minimum_depth_for_path = 0
 
-        self.min_scan_angle = rospy.get_param("~path_generator/min_scan_angle",)
-        self.max_scan_angle = rospy.get_param("~path_generator/max_scan_angle")
-        self.distance_constraint = rospy.get_param("~path_generator/distance_constraint")
-        
-        self.max_surge = rospy.get_param("~path_generator/surge_velocity")
-        self.max_yaw_rate = rospy.get_param("~path_generator/max_yaw_rate")
+        # Subscriber
+        self.create_subscription(OccupancyGrid, costmap_topic, self.mapCB, 10)
 
-        #Costmap subscriber.
-        rospy.Subscriber(costmap_topic, OccupancyGrid, self.mapCB)
-        
-        #Path Publisher
-        self.pub_path = rospy.Publisher(path_topic, Path, queue_size=1)
-        self.best_point_pub = rospy.Publisher(path_topic + "/best_point", Point, queue_size=1)
-
-        #Vx_frame image publisher
-        self.obstacle_distance_pub = rospy.Publisher(path_topic + "/distance_to_obstacle", Float32, queue_size=1)
-
-        self.image_process_pipeline_pub = rospy.Publisher(path_topic + "/image", Image, queue_size=1)
-
+        # Publishers
+        self.pub_path = self.create_publisher(Path, path_topic, 10)
+        self.best_point_pub = self.create_publisher(Point, f"{path_topic}/best_point", 10)
+        self.obstacle_distance_pub = self.create_publisher(Float32, f"{path_topic}/distance_to_obstacle", 10)
+        self.image_process_pipeline_pub = self.create_publisher(Image, f"{path_topic}/image", 10)
         self.bridge = CvBridge()
         
         #TF Buffer and Listener
         self.buffer = tf2_ros.Buffer()
-        tf_listener = tf2_ros.TransformListener(self.buffer)
+        tf_listener = tf2_ros.TransformListener(self.buffer, self)
 
         #TF BroadCaster
-        self.br = tf2_ros.TransformBroadcaster()
+        self.br = tf2_ros.TransformBroadcaster(self)
 
         self.start_time = time.time()
 
@@ -84,16 +96,16 @@ class PathGen:
         Transform Stuff
         """
         # Check robot_localisation has started publishing tf
-        self.buffer.can_transform(self.base_frame, self.odom_frame, rospy.Time(), rospy.Duration(8.0))
-        
+        # self.buffer.can_transform(self.base_frame, self.odom_frame, rospy.Time(), rospy.Duration(8.0))
+        self.buffer.can_transform(self.base_frame, self.odom_frame, Time())
         #Get Odom->Vx TF
-        odom_vx_tf = self.buffer.lookup_transform(self.base_frame, self.odom_frame, rospy.Time())
+        odom_vx_tf = self.buffer.lookup_transform(self.base_frame, self.odom_frame, rclpy.time.Time())
         self.vx_yaw = tf_transform.euler_from_quaternion([odom_vx_tf.transform.rotation.x,
                                             odom_vx_tf.transform.rotation.y,
                                             odom_vx_tf.transform.rotation.z,
                                             odom_vx_tf.transform.rotation.w])[2]
         #Get Vx->Odom TF
-        vx_odom_tf = self.buffer.lookup_transform(self.odom_frame, self.base_frame, rospy.Time())
+        vx_odom_tf = self.buffer.lookup_transform(self.odom_frame, self.base_frame, rclpy.time.Time())
         self.vx_x = vx_odom_tf.transform.translation.x
         self.vx_y = vx_odom_tf.transform.translation.y
         self.vx_z = vx_odom_tf.transform.translation.z # depth is -ve
@@ -177,7 +189,9 @@ class PathGen:
         elapsed_time = time.time() - self.start_time
         if elapsed_time > 1:
             self.start_time = time.time()
-            self.obstacle_distance_pub.publish(distance_to_obstacle)
+            msg = Float32()
+            msg.data = float(distance_to_obstacle)
+            self.obstacle_distance_pub.publish(msg)
 
         """
         Visualization
@@ -188,7 +202,7 @@ class PathGen:
                 cv2.imshow("edge_frame", edge_frame_debug)
                 cv2.waitKey(1)
             else:
-                rospy.logwarn_throttle(3, "Empty Costmap")
+                self.get_logger().warn("Empty Costmap", throttle_duration_sec = 3)
     
     def get_usable_edges(self, coordinates:list):
         """
@@ -554,7 +568,7 @@ class PathGen:
                 return vx_frame_model
 
             except TypeError:
-                rospy.logwarn_throttle(3, "No solution of curve found")
+                self.get_logger().warn("No solution of curve found", throttle_duration_sec = 3)
                 return -1
         else:
             return None
@@ -683,7 +697,7 @@ class PathGen:
                         pose_stamped = PoseStamped()
                         pose_stamped.header.frame_id = self.frame#
                         pose_stamped.header.stamp = self.time
-                        pose_stamped.header.seq = index
+                        # pose_stamped.header.seq = index
 
                         #IMAGE TO MAP FRAME FIXED TO ODOMs
                         """
@@ -704,10 +718,10 @@ class PathGen:
                         
                         pose_stamped.pose.position.x = x#self.height//4 - cords[1] * self.resolution
                         pose_stamped.pose.position.y = y#self.height//4 - cords[0] * self.resolution 
-                        pose_stamped.pose.orientation.x = 0
-                        pose_stamped.pose.orientation.y = 0
-                        pose_stamped.pose.orientation.z = 0
-                        pose_stamped.pose.orientation.w = 1
+                        pose_stamped.pose.orientation.x = np.float64(0)
+                        pose_stamped.pose.orientation.y = np.float64(0)
+                        pose_stamped.pose.orientation.z = np.float64(0)
+                        pose_stamped.pose.orientation.w = np.float64(1)
                         path.poses.append(pose_stamped)
                     self.path = path
                     self.pub_path.publish(path)
@@ -716,8 +730,11 @@ class PathGen:
                     self.best_point = [-self.best_point[1], -self.best_point[0]]
                     self.best_point = [((self.width//2 + self.best_point[0]) * self.resolution) + self.vx_x,
                                         ((self.height//2 + self.best_point[1]) * self.resolution) + self.vx_y]
-                    
-                    self.best_point_pub.publish(Point(self.best_point[0], self.best_point[1], 0))
+                    msg = Point()
+                    msg.x = self.best_point[0]
+                    msg.y = self.best_point[1]
+                    msg.z = np.float64(0)
+                    self.best_point_pub.publish(msg)
 
                     self.new_origin = [-self.new_origin[1], -self.new_origin[0]]
                     self.new_origin = [((self.width//2 + self.new_origin[0]) * self.resolution) + self.vx_x,
@@ -725,13 +742,13 @@ class PathGen:
                     
                     # Broadcast Odom-> Edge Frame TF
                     odom_costmap_tf = TransformStamped()
-                    odom_costmap_tf.header.stamp = rospy.Time.now()
+                    # odom_costmap_tf.header.stamp = rospy.Time.now()
                     odom_costmap_tf.header.frame_id = 'alpha_rise/odom'
                     odom_costmap_tf.child_frame_id = 'alpha_rise/costmap/edge_frame'
                     odom_costmap_tf.transform.translation.x = self.new_origin[0]
                     odom_costmap_tf.transform.translation.y = self.new_origin[1]
-                    odom_costmap_tf.transform.translation.z = 0
-                    rotation = tf_transform.quaternion_from_euler(np.float64(3.14),0,np.float64(-self.vx_yaw-1.57))
+                    odom_costmap_tf.transform.translation.z = np.float64(0)
+                    rotation = tf_transform.quaternion_from_euler(np.float64(3.14),np.float64(0),np.float64(-self.vx_yaw-1.57))
                     odom_costmap_tf.transform.rotation.x = rotation[0]
                     odom_costmap_tf.transform.rotation.y = rotation[1]
                     odom_costmap_tf.transform.rotation.z = rotation[2]
@@ -740,13 +757,13 @@ class PathGen:
 
                     # Broadcast Edge Frame-> Line Frame TF
                     odom_costmap_tf = TransformStamped()
-                    odom_costmap_tf.header.stamp = rospy.Time.now()
+                    # odom_costmap_tf.header.stamp = rospy.Time.now()
                     odom_costmap_tf.header.frame_id = 'alpha_rise/costmap/edge_frame'
                     odom_costmap_tf.child_frame_id = 'alpha_rise/costmap/line_frame'
-                    odom_costmap_tf.transform.translation.x = 0
-                    odom_costmap_tf.transform.translation.y = 0
-                    odom_costmap_tf.transform.translation.z = 0
-                    rotation = tf_transform.quaternion_from_euler(0,0, np.float64(self.angle_from_e_to_l))
+                    odom_costmap_tf.transform.translation.x = np.float64(0)
+                    odom_costmap_tf.transform.translation.y = np.float64(0)
+                    odom_costmap_tf.transform.translation.z = np.float64(0)
+                    rotation = tf_transform.quaternion_from_euler(np.float64(0),np.float64(0), np.float64(self.angle_from_e_to_l))
                     odom_costmap_tf.transform.rotation.x = rotation[0]
                     odom_costmap_tf.transform.rotation.y = rotation[1]
                     odom_costmap_tf.transform.rotation.z = rotation[2]
@@ -766,10 +783,10 @@ class PathGen:
                 pose_stamped.header.stamp = self.time
                 pose_stamped.pose.position.x = self.vx_x  #self.height//4 - cords[1] * self.resolution
                 pose_stamped.pose.position.y = self.vx_y #self.height//4 - cords[0] * self.resolution 
-                pose_stamped.pose.orientation.x = 0
-                pose_stamped.pose.orientation.y = 0
-                pose_stamped.pose.orientation.z = 0
-                pose_stamped.pose.orientation.w = 1
+                pose_stamped.pose.orientation.x = np.float64(0)
+                pose_stamped.pose.orientation.y = np.float64(0)
+                pose_stamped.pose.orientation.z = np.float64(0)
+                pose_stamped.pose.orientation.w = np.float64(1)
                 path.poses.append(pose_stamped)
                 self.pub_path.publish(path)
         else: # depth greater than -2
@@ -782,10 +799,10 @@ class PathGen:
             pose_stamped.header.stamp = self.time
             pose_stamped.pose.position.x = self.vx_x  #self.height//4 - cords[1] * self.resolution
             pose_stamped.pose.position.y = self.vx_y #self.height//4 - cords[0] * self.resolution 
-            pose_stamped.pose.orientation.x = 0
-            pose_stamped.pose.orientation.y = 0
-            pose_stamped.pose.orientation.z = 0
-            pose_stamped.pose.orientation.w = 1
+            pose_stamped.pose.orientation.x = np.float64(0)
+            pose_stamped.pose.orientation.y = np.float64(0)
+            pose_stamped.pose.orientation.z = np.float64(0)
+            pose_stamped.pose.orientation.w = np.float64(1)
             path.poses.append(pose_stamped)
             self.pub_path.publish(path)
     
@@ -890,7 +907,11 @@ class PathGen:
             # print("No valid point")
             return -1
 
-if __name__ == "__main__":
-    rospy.init_node('path_node')
-    PathGen()
-    rospy.spin()
+def main():
+    rclpy.init()
+    node = PathGen()
+    rclpy.spin(node)
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()

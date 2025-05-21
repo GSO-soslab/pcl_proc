@@ -15,8 +15,9 @@ setup(
         # Ensure the 'launch' files are correctly handled
         (os.path.join('share', package_name, 'launch'), glob(os.path.join('launch', '*'))),
         # Ensure the 'config' YAML files are correctly handled
-        (os.path.join('share', package_name, 'config'),
-            glob(os.path.join('config', '*.yaml'))),
+        (os.path.join('share', package_name, 'config'),glob(os.path.join('config', '*.yaml'))),
+        (os.path.join('share', package_name, 'pcl_proc'),glob(os.path.join('pcl_proc', 'path_utils.py'))),
+
 
     ],
     install_requires=['setuptools'],
@@ -29,6 +30,7 @@ setup(
     entry_points={
         'console_scripts': [
             'pcl_filter_node = pcl_proc.filter:main',
+            'path_generator = pcl_proc.path_gen:main',
         ],
     },
 )
