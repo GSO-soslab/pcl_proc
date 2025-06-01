@@ -5,7 +5,7 @@
     costmap_topic: '/local_costmap/costmap'
     path_topic: 'path'
     debug: false
-    enable_search_mode: false
+    enable_search_mode: true
     msis_vertical_beamwidth: 25 #degree
     canny_min_threshold: 200
     canny_max_threshold: 255

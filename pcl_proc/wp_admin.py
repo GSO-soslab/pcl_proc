@@ -6,76 +6,100 @@
 #tony.jacob@uri.edu
 
 #rosbag record /alpha_rise/path/state /alpha_rise/path/distance_to_obstacle /alpha_rise/odometry/filtered/local
-import rospy
+import rclpy
+from rclpy.parameter import Parameter
+from rclpy.node import Node
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.time import Time
+from builtin_interfaces.msg import Duration
 from nav_msgs.msg import Path
 from geometry_msgs.msg import PolygonStamped, Point32, PointStamped, Point
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, Int16
 import math
-from mvp_msgs.srv import GetStateRequest, GetState, ChangeState, ChangeStateRequest, GetWaypoints, GetWaypointsRequest
+from mvp_msgs.srv import  GetState, ChangeState, GetWaypoints
 import time
 import tf2_ros
 import tf2_geometry_msgs
 import numpy as np
 
-class Wp_Admin:
+class Wp_Admin(Node):
     def __init__(self):
+        super().__init__('waypoint_admin')
         """
         Constructer. Init all pubs, subs, variables
         """
-        standoff_distance_in_meters = rospy.get_param("~waypoint_admin/stand_off_distance_param")
-        self.standoff_distance_in_meters = rospy.get_param(standoff_distance_in_meters)
-        update_waypoint_topic = rospy.get_param("~waypoint_admin/update_waypoint_topic")
-        path_topic = rospy.get_param("~waypoint_admin/path_topic", "/alpha_rise/path")
 
-        self.get_state_service = rospy.get_param("~waypoint_admin/get_state_service", "/alpha_rise/helm/get_state")
-        self.change_state_service = rospy.get_param("~waypoint_admin/change_state_service", "/alpha_rise/helm/change_state")
-        self.get_waypoint_service = rospy.get_param("~waypoint_admin/get_waypoint", "/alpha_rise/helm/path_3d/get_next_waypoints")
-        n_points = rospy.get_param("~waypoint_admin/n_points_param")
-        self.n_points = rospy.get_param(n_points)
-        self.reacquision_s_param = rospy.get_param("~waypoint_admin/reacquisition_s_param")
-
-
-        #Waypoint selection param
-        self.update_rate = rospy.get_param("~waypoint_admin/check_state_update_rate")
-        self.depth = rospy.get_param("~waypoint_admin/operating_depth")
+        self.declare_parameter("stand_off_distance", Parameter.Type.DOUBLE)
+        self.declare_parameter('update_waypoint_topic', Parameter.Type.STRING)
+        self.declare_parameter('path_topic', Parameter.Type.STRING)
+        self.declare_parameter('get_state_service', Parameter.Type.STRING)
+        self.declare_parameter('change_state_service', Parameter.Type.STRING )
+        self.declare_parameter('get_waypoint_service', Parameter.Type.STRING)
+        self.declare_parameter('n_points', Parameter.Type.INTEGER)
+        self.declare_parameter('reacquisition_s_param', Parameter.Type.DOUBLE)
+        self.declare_parameter('check_state_update_rate', Parameter.Type.INTEGER)
+        self.declare_parameter('operating_depth', Parameter.Type.DOUBLE)
         
+        self.standoff_distance_in_meters = self.get_parameter("stand_off_distance").get_parameter_value().double_value
+        update_waypoint_topic = self.get_parameter('update_waypoint_topic').get_parameter_value().string_value
+        path_topic = self.get_parameter('path_topic').get_parameter_value().string_value
+        self.get_state_service_name = self.get_parameter('get_state_service').get_parameter_value().string_value
+        self.change_state_service_name = self.get_parameter('change_state_service').get_parameter_value().string_value
+        self.get_waypoint_service_name = self.get_parameter('get_waypoint_service').get_parameter_value().string_value
+        self.n_points = self.get_parameter('n_points').get_parameter_value().integer_value
+        self.reacquisition_s_param = self.get_parameter('reacquisition_s_param').get_parameter_value().double_value
+        self.update_rate = self.get_parameter('check_state_update_rate').get_parameter_value().integer_value
+        self.depth = self.get_parameter('operating_depth').get_parameter_value().double_value
+
         #To remove surface reflections from FLS, this is the min depth, the vehicle must be at.
         # self.depth = -math.tan(math.radians(self.depth)) * self.standoff_distance_in_meters
 
-        self.search_mode_initial_radius = rospy.get_param("~waypoint_admin/search_mode_initial_radius")
+        self.declare_parameter('search_mode_initial_radius', Parameter.Type.DOUBLE)
+        self.declare_parameter('search_mode_timer', Parameter.Type.INTEGER)
+        self.declare_parameter('follow_mode_timer',Parameter.Type.INTEGER)
+        self.declare_parameter('exit_mode_distance',Parameter.Type.DOUBLE)
 
-        #Timers
-        self.search_mode_timer_param = rospy.get_param("~waypoint_admin/search_mode_timer")
+        # Read parameters
+        self.search_mode_initial_radius = self.get_parameter('search_mode_initial_radius').get_parameter_value().double_value
+
+        # Timers
+        self.search_mode_timer_param = self.get_parameter('search_mode_timer').get_parameter_value().integer_value
         self.search_mode_timer = time.time()
-        
-        self.follow_mode_timer_param = rospy.get_param("~waypoint_admin/follow_mode_timer")
+
+        self.follow_mode_timer_param = self.get_parameter('follow_mode_timer').get_parameter_value().integer_value
         self.follow_flag = 0
 
-        self.exit_mode_distance = rospy.get_param("~waypoint_admin/exit_mode_distance")
+        self.exit_mode_distance = self.get_parameter('exit_mode_distance').get_parameter_value().double_value
 
+        # Declare publishers
+        self.pub_update = self.create_publisher(PolygonStamped, update_waypoint_topic, 1)
+        self.pub_state = self.create_publisher(Int16, path_topic + '/state', 1)
 
-        #Declare Pubs
-        self.pub_update = rospy.Publisher(update_waypoint_topic, PolygonStamped, queue_size=1)
-        self.pub_state = rospy.Publisher(path_topic + '/state', Float32, queue_size=1)
+        # Declare subscribers
+        self.create_subscription(Path, path_topic, self.path_cB, 1)
+        self.create_subscription(Float32, path_topic + '/distance_to_obstacle', self.distance_cB, 1)
+        self.create_subscription(Point, path_topic + "/best_point", self.point_cB, 1)
+
+        # Declare services
+        self.get_waypoint_service_client = self.create_client(GetWaypoints, self.get_waypoint_service_name)
+        self.get_state_service_client = self.create_client(GetState, self.get_state_service_name)
+        self.change_state_service_client = self.create_client(ChangeState, self.change_state_service_name)
+
         
-        #Declare Subs
-        rospy.Subscriber(path_topic, Path, callback=self.path_cB)
-        rospy.Subscriber(path_topic + '/distance_to_obstacle', Float32, callback= self.distance_cB)
-        rospy.Subscriber(path_topic +"/best_point", Point, callback=self.point_cB)
-
         #Declare variables
-        self.check_state_timer = time.time()
         self.state = None
         self.distance_to_obstacle = None
-
+        self.create_timer(self.update_rate, self.check_state)
+        
         self.tf_buffer = tf2_ros.Buffer()
-        listener = tf2_ros.TransformListener(self.tf_buffer)
+        listener = tf2_ros.TransformListener(self.tf_buffer,self)
 
-        self.node_name = rospy.get_name()
+        self.node_name = self.get_name()
 
         self.poses = []
 
         self.count_concentric_circles = 0
+        self.x, self.y = 0.0,0.0
         
         self.bool_search_mode = False
 
@@ -90,33 +114,43 @@ class Wp_Admin:
     def distance_cB(self, msg):
         """
         Distance to obstacle callback. 
-        This function syncs with the autonomy state machine indicator.
+        This function syncs the distance with the autonomy state machine indicator.
         Depending on the waypoints in the Helm, 
         One can determine if in Following (0) or IceReac (1)
         """
         self.distance_to_obstacle = msg.data
         
-        get_waypoint_client = rospy.ServiceProxy(self.get_waypoint_service, GetWaypoints)
-        request = GetWaypointsRequest()
-        response = get_waypoint_client(request)
-        # print(len(response.wpt))
-        # 2 is the len(response.wpt) when in following.
-        if len(response.wpt) == 2:
-            if self.bool_exit_mode:
-                # print(self.distance_to_obstacle,"exit_mode",time.time())
-                self.pub_state.publish(2)
+        request = GetWaypoints.Request()
+        future = self.get_waypoint_service_client.call_async(request)
+        future.add_done_callback(self.get_n_waypoints)
+
+    def get_n_waypoints(self, future):
+        if future.done():
+            response = future.result()
+            n_wpt = len(response.wpt)
+            msg = Int16()
+
+            # 2 is the len(response.wpt) when in following.
+            if n_wpt == 2:
+                if self.bool_exit_mode:
+                    # print(self.distance_to_obstacle,"exit_mode",time.time())
+                    msg.data=2
+                    self.pub_state.publish(msg)
+                else:
+                    # print(self.distance_to_obstacle,"Following",time.time())
+                    msg.data=0
+                    self.pub_state.publish(msg)
+            #Search Mode
             else:
-                # print(self.distance_to_obstacle,"Following",time.time())
-                self.pub_state.publish(0)
-        #Search Mode
-        else:
-            if self.bool_search_mode:
-                # print(self.distance_to_obstacle, "search",time.time())
-                self.pub_state.publish(-1)
-            #Iceberg Reaaq
-            else:
-                # print(self.distance_to_obstacle,"reacq",time.time())
-                self.pub_state.publish(1) 
+                if self.bool_search_mode:
+                    # print(self.distance_to_obstacle, "search",time.time())
+                    msg.data = -1
+                    self.pub_state.publish(msg)
+                #Iceberg Reaaq
+                else:
+                    # print(self.distance_to_obstacle,"reacq",time.time())
+                    msg.data = 1
+                    self.pub_state.publish(msg) 
 
     def path_cB(self, msg):
         """
@@ -127,19 +161,16 @@ class Wp_Admin:
 
         #Vx position and bearing in Odom frame.
         self.base_to_odom_tf = self.tf_buffer.lookup_transform("alpha_rise/odom", "alpha_rise/base_link", 
-                                                               rospy.Time(0), rospy.Duration(1.0))
+                                                              rclpy.time.Time())
         
         #Odom frame point in Vx frame
         self.odom_to_base_tf = self.tf_buffer.lookup_transform("alpha_rise/base_link", "alpha_rise/odom", 
-                                                               rospy.Time(0), rospy.Duration(1.0))
+                                                               rclpy.time.Time())
         #Create Waypoint Message
         wp = PolygonStamped()
         wp.header.stamp = msg.header.stamp
         wp.header.frame_id = msg.header.frame_id
         
-        #Check state whether survey_3d or start
-        self.check_state()
-
         # Valid path is n_points long. 
         # Path is always being published.
         # If same path, then no new path is then published.
@@ -148,12 +179,11 @@ class Wp_Admin:
             #Check number of points in front of the vehicle
             n_points_above_vx = 0
             for pose in msg.poses:
-                path_vx_frame = tf2_geometry_msgs.do_transform_pose(pose, self.odom_to_base_tf)
+                path_vx_frame = tf2_geometry_msgs.do_transform_pose_stamped(pose, self.odom_to_base_tf)
                 if path_vx_frame.pose.position.x > 0:
                     n_points_above_vx += 1 
 
-            if self.state == "survey_3d":
-                # print(n_points_above_vx)
+            if self.state == "survey":
 
                 if msg.poses != self.poses:
                     
@@ -164,16 +194,20 @@ class Wp_Admin:
                     
                     #Feed best point.
                     if(time.time() - self.follow_mode_timer) < self.follow_mode_timer_param:
-                        rospy.loginfo_throttle(3, "Following Mode")
+                        self.get_logger().info("Following Mode", throttle_duration_sec = 3)
                         self.bool_search_mode = False
-                        wp.polygon.points.append(Point32(self.x ,self.y, self.depth))
+                        best_point = Point32()
+                        best_point.x = self.x
+                        best_point.y = self.y
+                        best_point.z = self.depth
+                        wp.polygon.points.append(best_point)
                         self.pub_update.publish(wp)
                         self.poses = msg.poses
                     
                     #Chart a course away from the iceberg when timer runs out.
                     #Go to a point 90 degree port side of Vx
                     else:
-                        rospy.loginfo(f"Exit sequence. Timer ran out at {self.follow_mode_timer_param}s")
+                        self.get_logger().info(f"Exit sequence. Timer ran out at {self.follow_mode_timer_param}s")
                         self.exit_sequence(wp)
 
             #Iceberg Reacquisition Mode is when 
@@ -189,14 +223,15 @@ class Wp_Admin:
                 self.count_concentric_circles += 1
                 self.searching_mode(wp)
 
-            elif self.state == "survey_3d":
+            elif self.state == "survey":
                 #If timer runs out, then the node is killed.
                 if(time.time() - self.search_mode_timer) > self.search_mode_timer_param: #sec
-                    service_client_change_state = rospy.ServiceProxy(self.change_state_service, ChangeState)
-                    request = ChangeStateRequest("start", self.node_name)
-                    response = service_client_change_state(request)
-                    rospy.loginfo(f"Search Mode Took too long")
-                    rospy.signal_shutdown("Search Mode Took too long")
+                    service_client_change_state = self.create_client(ChangeState,self.change_state_service)
+                    request = ChangeState.Request("start", self.node_name)
+                    response = service_client_change_state.call_async(request)
+                    self.get_logger().warn("Search Mode Took too long --shutting down")
+                    self.destroy_node()
+                    rclpy.shutdown()
         
     def exit_sequence(self, wp):
         """
@@ -208,25 +243,34 @@ class Wp_Admin:
         #Line_frame point in Odom Frame
         line_frame_to_odom_tf = self.tf_buffer.lookup_transform("alpha_rise/odom", 
                                                                 "alpha_rise/costmap/line_frame", 
-                                                               rospy.Time(0), rospy.Duration(1.0))
+                                                               rclpy.time.Time())
         
         vx_to_line_frame_tf = self.tf_buffer.lookup_transform("alpha_rise/costmap/line_frame", 
                                                                 "alpha_rise/base_link", 
-                                                               rospy.Time(0), rospy.Duration(1.0))
+                                                               rclpy.time.Time())
         exit_point = PointStamped()
-        exit_point.point.x = 0
+        exit_point.point.x = np.float64(0)
         if vx_to_line_frame_tf.transform.translation.y > 0:
             exit_point.point.y = self.exit_mode_distance + self.standoff_distance_in_meters
         else:
             exit_point.point.y = -self.exit_mode_distance - self.standoff_distance_in_meters
             
         exit_point_odom_frame = tf2_geometry_msgs.do_transform_point(exit_point, line_frame_to_odom_tf)
+        
+        exit_msg = Point32()
+        exit_msg.x = exit_point_odom_frame.point.x
+        exit_msg.y = exit_point_odom_frame.point.y
+        exit_msg.z = np.float64(0)
 
-        wp.polygon.points.append(Point32(exit_point_odom_frame.point.x, exit_point_odom_frame.point.y, 0))
+        wp.polygon.points.append(exit_msg)
         self.pub_update.publish(wp)
         time.sleep(10)
-        rospy.signal_shutdown(f"Follow Mode completed. Timeout of {self.follow_mode_timer_param}s.Starting course away from the iceberg to {exit_point_odom_frame.point}")
-
+        self.get_logger().info(
+                    f"Follow Mode completed. Timeout of {self.follow_mode_timer_param}s. "
+                    f"Starting course away from the iceberg to {exit_point_odom_frame.point}"
+                    )
+        self.destroy_node()
+        rclpy.shutdown()
 
     def searching_mode(self, wp):
         self.bool_search_mode = True
@@ -256,13 +300,19 @@ class Wp_Admin:
                                             radius = search_mode_radius)
     
         for i in range(len(search_mode_points)):
-            wp.polygon.points.append(Point32(search_mode_points[i].point.x ,search_mode_points[i].point.y, search_mode_depth))
+            msg = Point32()
+            msg.x = search_mode_points[i].point.x
+            msg.y = search_mode_points[i].point.y
+            msg.z = search_mode_depth
+            wp.polygon.points.append(msg)
 
-        service_client_change_state = rospy.ServiceProxy(self.change_state_service, ChangeState)
-        request = ChangeStateRequest("survey_3d", self.node_name)
-        response = service_client_change_state(request)
+        request = ChangeState.Request()
+        request.state = "survey"
+        request.caller = self.node_name
+        future = self.change_state_service_client.call_async(request)
+        future.add_done_callback(self.get_state_callback)
         self.pub_update.publish(wp)
-        rospy.loginfo_throttle(3, "Search Mode")
+        self.get_logger().info("Search Mode", throttle_duration_sec = 3)
         time.sleep(1)
 
     def iceberg_reacquisition_mode(self, wp):
@@ -271,11 +321,13 @@ class Wp_Admin:
         so as to reacquire acoustic contact
         """
         #Switch state to survey_3d
-        service_client_change_state = rospy.ServiceProxy(self.change_state_service, ChangeState)
-        request = ChangeStateRequest("survey_3d", self.node_name)
-        response = service_client_change_state(request)
+        request = ChangeState.Request()
+        request.state = "survey"
+        request.caller = self.node_name
+        future = self.change_state_service_client.call_async(request)
+        future.add_done_callback(self.get_state_callback)
         #The center point of the circle in vx frame
-        point_of_obstacle = [self.reacquision_s_param*self.standoff_distance_in_meters, -self.standoff_distance_in_meters]
+        point_of_obstacle = [self.reacquisition_s_param*self.standoff_distance_in_meters, -self.standoff_distance_in_meters]
         corner_bhvr_points = self.draw_arc(number_of_points=self.n_points, 
                                                    start_angle=math.pi/2, 
                                                    end_angle=0,
@@ -284,23 +336,29 @@ class Wp_Admin:
     
         #Append the waypoints
         for i in range(len(corner_bhvr_points)):
-            wp.polygon.points.append(Point32(corner_bhvr_points[i].point.x ,corner_bhvr_points[i].point.y, self.depth))
-        rospy.loginfo_throttle(3,"Iceberg Reacquisition Mode")
+            msg =Point32()
+            msg.x = corner_bhvr_points[i].point.x 
+            msg.y = corner_bhvr_points[i].point.y
+            msg.z = self.depth
+            wp.polygon.points.append(msg)
+        # rospy.loginfo_throttle(3,"Iceberg Reacquisition Mode")
+        self.get_logger().info("Iceberg Reacquisition Mode", throttle_duration_sec = 3)
         self.pub_update.publish(wp)
 
     def check_state(self):
         """
         Function to check the state of the helm
         """
-        elapsed_time = time.time() - self.check_state_timer
-        #Check state every 2s
-        if elapsed_time > self.update_rate:
-            self.check_state_timer = time.time()
-            service_client_get_state = rospy.ServiceProxy(self.get_state_service, GetState)
-            request = GetStateRequest("")
-            response = service_client_get_state(request)
-            self.state = response.state.name
+        request = GetState.Request()
+        future = self.get_state_service_client.call_async(request)
+        future.add_done_callback(self.get_state_callback)
 
+
+    def get_state_callback(self,future):
+        response = future.result()
+        self.state = response.state.name
+        
+        
     def extend_line_from_point(self, point, orientation, length):
         # Convert orientation from degrees to radians
         angle_radians = math.radians(orientation)
@@ -338,7 +396,16 @@ class Wp_Admin:
 
         return points_in_odom_frame
 
+def main():
+    rclpy.init()
+    node = Wp_Admin()
+    rclpy.spin(node)
+    rclpy.shutdown()
+
+    # executor = MultiThreadedExecutor()
+    # executor.add_node(node)
+    # executor.spin()
+    # rclpy.shutdown()
+
 if __name__ == "__main__":
-    rospy.init_node("waypoint_administrator")
-    Wp_Admin()
-    rospy.spin()
+    main()
