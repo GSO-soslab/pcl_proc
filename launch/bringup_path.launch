@@ -1,4 +1,0 @@
-<launch>
-    <include file="$(find pcl_proc)/launch/costmap.launch"/>
-    <include file="$(find pcl_proc)/launch/path_gen.launch"/>
-</launch>

@@ -1,8 +1,0 @@
-<launch>
-    <node pkg="rosbag" type="play" name="player" args="-s 12 --clock /home/soslab/auv_ws/bags/autonomy/test2.bag"/>
-    <node name="plot_node" 
-            pkg="pcl_proc" 
-            type="plot_stand_off.py"  
-            output="screen">
-    </node>
-</launch>
