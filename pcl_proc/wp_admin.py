@@ -121,6 +121,7 @@ class Wp_Admin(Node):
         self.distance_to_obstacle = msg.data
         
         request = GetWaypoints.Request()
+        request.count.data = 0
         future = self.get_waypoint_service_client.call_async(request)
         future.add_done_callback(self.get_n_waypoints)
 
@@ -129,7 +130,6 @@ class Wp_Admin(Node):
             response = future.result()
             n_wpt = len(response.wpt)
             msg = Int16()
-
             # 2 is the len(response.wpt) when in following.
             if n_wpt == 2:
                 if self.bool_exit_mode:
@@ -159,6 +159,12 @@ class Wp_Admin(Node):
         The behaviours are implemented.
         """
 
+        while not self.tf_buffer.can_transform("alpha_rise/odom",
+                                        "alpha_rise/base_link",
+                                        rclpy.time.Time()  # latest available
+                                        ):
+            time.sleep(1)
+            self.get_logger().info("Waiting for tf...")
         #Vx position and bearing in Odom frame.
         self.base_to_odom_tf = self.tf_buffer.lookup_transform("alpha_rise/odom", "alpha_rise/base_link", 
                                                               rclpy.time.Time())
@@ -240,37 +246,55 @@ class Wp_Admin(Node):
         """
         self.bool_exit_mode = True
                 
-        #Line_frame point in Odom Frame
-        line_frame_to_odom_tf = self.tf_buffer.lookup_transform("alpha_rise/odom", 
-                                                                "alpha_rise/costmap/line_frame", 
-                                                               rclpy.time.Time())
-        
-        vx_to_line_frame_tf = self.tf_buffer.lookup_transform("alpha_rise/costmap/line_frame", 
-                                                                "alpha_rise/base_link", 
-                                                               rclpy.time.Time())
-        exit_point = PointStamped()
-        exit_point.point.x = np.float64(0)
-        if vx_to_line_frame_tf.transform.translation.y > 0:
-            exit_point.point.y = self.exit_mode_distance + self.standoff_distance_in_meters
-        else:
-            exit_point.point.y = -self.exit_mode_distance - self.standoff_distance_in_meters
+        # Costmap frames only exists if path can be generated. If in Reacquisition mode,
+        # then direct away from the iceberg
+        if self.tf_buffer.can_transform("alpha_rise/odom",
+                                        "alpha_rise/costmap/line_frame",
+                                        rclpy.time.Time() ) and self.tf_buffer.can_transform("alpha_rise/costmap/line_frame",
+                                                                                "alpha_rise/base_link",
+                                                                                rclpy.time.Time()  # latest available
+                                                                                ):
+            #Line_frame point in Odom Frame
+            line_frame_to_odom_tf = self.tf_buffer.lookup_transform("alpha_rise/odom", 
+                                                                    "alpha_rise/costmap/line_frame", 
+                                                                rclpy.time.Time())
             
-        exit_point_odom_frame = tf2_geometry_msgs.do_transform_point(exit_point, line_frame_to_odom_tf)
+            vx_to_line_frame_tf = self.tf_buffer.lookup_transform("alpha_rise/costmap/line_frame", 
+                                                                    "alpha_rise/base_link", 
+                                                                rclpy.time.Time())
+            exit_point = PointStamped()
+            exit_point.point.x = np.float64(0)
+            
+            if vx_to_line_frame_tf.transform.translation.y > 0:
+                exit_point.point.y = self.exit_mode_distance + self.standoff_distance_in_meters
+            else:
+                exit_point.point.y = -self.exit_mode_distance - self.standoff_distance_in_meters
+                
+            exit_point_odom_frame = tf2_geometry_msgs.do_transform_point(exit_point, line_frame_to_odom_tf)
+            
+            exit_msg = Point32()
+            exit_msg.x = exit_point_odom_frame.point.x
+            exit_msg.y = exit_point_odom_frame.point.y
+            exit_msg.z = np.float64(0)
         
-        exit_msg = Point32()
-        exit_msg.x = exit_point_odom_frame.point.x
-        exit_msg.y = exit_point_odom_frame.point.y
-        exit_msg.z = np.float64(0)
+        else:
+            exit_point_odom_frame = self.base_to_odom_tf.transform.translation
+            exit_msg = Point32()
+            exit_msg.x = exit_point_odom_frame.x
+            exit_msg.y = exit_point_odom_frame.y + self.exit_mode_distance
+            exit_msg.z = np.float64(0)
+
 
         wp.polygon.points.append(exit_msg)
         self.pub_update.publish(wp)
-        time.sleep(10)
+        msg = Int16()
+        msg.data=2
+        self.pub_state.publish(msg)
+        time.sleep(2)
         self.get_logger().info(
-                    f"Follow Mode completed. Timeout of {self.follow_mode_timer_param}s. "
-                    f"Starting course away from the iceberg to {exit_point_odom_frame.point}"
+                    f"Mission completed. Timeout of {self.follow_mode_timer_param}s. "
                     )
         self.destroy_node()
-        rclpy.shutdown()
 
     def searching_mode(self, wp):
         self.bool_search_mode = True
@@ -313,6 +337,7 @@ class Wp_Admin(Node):
         future.add_done_callback(self.get_state_callback)
         self.pub_update.publish(wp)
         self.get_logger().info("Search Mode", throttle_duration_sec = 3)
+        self.state = "survey"
         time.sleep(1)
 
     def iceberg_reacquisition_mode(self, wp):

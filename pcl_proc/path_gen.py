@@ -25,6 +25,8 @@ import path_utils
 import time
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
+from lifecycle_msgs.srv import ChangeState
+from lifecycle_msgs.msg import Transition
 
 class PathGen(Node):
     def __init__(self):
@@ -91,6 +93,33 @@ class PathGen(Node):
 
         self.path = None
         
+        #LifeCycle Node Transitions
+        target_node = '/alpha_rise/costmap'
+        self.client = self.create_client(ChangeState, f'{target_node}/change_state')
+        
+        self.transition()
+    
+    def transition(self):
+        req = ChangeState.Request()
+        req.transition.id = Transition.TRANSITION_CONFIGURE
+        label = "TRANSITION"
+        future = self.client.call_async(req)
+        rclpy.spin_until_future_complete(self, future)
+        if future.result().success:
+            self.get_logger().info(f'Successfully performed transition: {label}')
+        else:
+            self.get_logger().error(f'Failed to perform transition: {label}')
+
+        
+        req.transition.id = Transition.TRANSITION_ACTIVATE
+        label = "ACTIVATE"
+        future = self.client.call_async(req)
+        rclpy.spin_until_future_complete(self, future)
+        if future.result().success:
+            self.get_logger().info(f'Successfully performed transition: {label}')
+        else:
+            self.get_logger().error(f'Failed to perform transition: {label}')
+
     def mapCB(self, message:OccupancyGrid):
         """
         Transform Stuff
