@@ -110,7 +110,7 @@ class PathGen(Node):
         else:
             self.get_logger().error(f'Failed to perform transition: {label}')
 
-        
+        time.sleep(1)
         req.transition.id = Transition.TRANSITION_ACTIVATE
         label = "ACTIVATE"
         future = self.client.call_async(req)
@@ -119,6 +119,7 @@ class PathGen(Node):
             self.get_logger().info(f'Successfully performed transition: {label}')
         else:
             self.get_logger().error(f'Failed to perform transition: {label}')
+        time.sleep(1)
 
     def mapCB(self, message:OccupancyGrid):
         """
