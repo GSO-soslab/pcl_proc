@@ -5,7 +5,7 @@
 #Manages the autonomy state machine of the vehicle
 #tony.jacob@uri.edu
 
-#rosbag record /alpha_rise/path/state /alpha_rise/path/distance_to_obstacle /alpha_rise/odometry/filtered/local
+#ros2 bag record /alpha_rise/path/state /alpha_rise/path/distance_to_obstacle /alpha_rise/odometry/filtered/local /alpha_rise/path /alpha_rise/fls/pointcloud
 import rclpy
 from rclpy.parameter import Parameter
 from rclpy.node import Node
