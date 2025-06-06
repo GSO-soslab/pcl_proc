@@ -278,10 +278,17 @@ class Wp_Admin(Node):
             exit_msg.z = np.float64(0)
         
         else:
-            exit_point_odom_frame = self.base_to_odom_tf.transform.translation
+            #Point in BaseFrame
+            exit_point = PointStamped()
+            exit_point.point.x = np.float64(0)
+            exit_point.point.y = self.exit_mode_distance
+            
+            #Transform to Odom
+            exit_point_odom_frame = tf2_geometry_msgs.do_transform_point(exit_point, self.base_to_odom_tf)
+
             exit_msg = Point32()
-            exit_msg.x = exit_point_odom_frame.x
-            exit_msg.y = exit_point_odom_frame.y + self.exit_mode_distance
+            exit_msg.x = exit_point_odom_frame.point.x
+            exit_msg.y = exit_point_odom_frame.point.y
             exit_msg.z = np.float64(0)
 
 
