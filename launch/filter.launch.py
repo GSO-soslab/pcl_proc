@@ -20,7 +20,7 @@ def generate_launch_description():
     
     node = Node(
         package='pcl_proc',
-        executable='pcl_filter_node',
+        executable='filter.py',
         name='pcl_filter_node',
         namespace="alpha_rise",
         output='screen',

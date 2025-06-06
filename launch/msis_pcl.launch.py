@@ -15,16 +15,16 @@ def generate_launch_description():
     param_config = os.path.join(
         get_package_share_directory('pcl_proc'),
         'config',
-        'path_gen.yaml'
+        'msis.yaml'
     )
-    
+
     node = Node(
         package='pcl_proc',
-        executable='path_gen.py',
-        name='path_generator',
+        executable='msis_pcl',
+        name='msis_pcl_node',
         namespace="alpha_rise",
         output='screen',
-        parameters=[param_config]
+        parameters=[param_config]        
     )
 
     ld.add_action(node)

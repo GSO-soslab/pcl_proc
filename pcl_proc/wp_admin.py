@@ -214,7 +214,7 @@ class Wp_Admin(Node):
                     #Go to a point 90 degree port side of Vx
                     else:
                         self.get_logger().info(f"Exit sequence. Timer ran out at {self.follow_mode_timer_param}s")
-                        self.exit_sequence(wp)
+                        self.exit_mode(wp)
 
             #Iceberg Reacquisition Mode is when 
             #the vehicle reaches end of a valid path.
@@ -227,7 +227,7 @@ class Wp_Admin(Node):
             # rospy.loginfo("Searching Mode")
             if self.state == "start":
                 self.count_concentric_circles += 1
-                self.searching_mode(wp)
+                self.search_mode(wp)
 
             elif self.state == "survey":
                 #If timer runs out, then the node is killed.
@@ -239,7 +239,7 @@ class Wp_Admin(Node):
                     self.destroy_node()
                     rclpy.shutdown()
         
-    def exit_sequence(self, wp):
+    def exit_mode(self, wp):
         """
         Function to navigate the vehicle 
         away from the iceberg when the timer runs out.
@@ -296,7 +296,7 @@ class Wp_Admin(Node):
                     )
         self.destroy_node()
 
-    def searching_mode(self, wp):
+    def search_mode(self, wp):
         self.bool_search_mode = True
 
         #Change here for initial depth.

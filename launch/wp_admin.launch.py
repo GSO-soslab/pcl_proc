@@ -20,7 +20,7 @@ def generate_launch_description():
     
     node = Node(
         package='pcl_proc',
-        executable='waypoint_admin',
+        executable='wp_admin.py',
         name='waypoint_admin',
         namespace="alpha_rise",
         output='screen',
