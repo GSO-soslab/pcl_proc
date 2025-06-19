@@ -33,12 +33,12 @@ class Filter(Node):
 
 
         else:
-            self.declare_parameter('sub_topic')
-            self.declare_parameter('pub_topic')
-            self.declare_parameter('std_dev_multiplier')
-            self.declare_parameter('radial_filter_param')
-            self.declare_parameter('range_max')
-            self.declare_parameter('number_of_bins')
+            self.declare_parameter('sub_topic', Parameter.Type.STRING)
+            self.declare_parameter('pub_topic', Parameter.Type.STRING)
+            self.declare_parameter('std_dev_multiplier', Parameter.Type.DOUBLE)
+            self.declare_parameter('radial_filter_param', Parameter.Type.DOUBLE)
+            self.declare_parameter('range_max', Parameter.Type.DOUBLE)
+            self.declare_parameter('number_of_bins', Parameter.Type.INTEGER)
 
             # Get parameters
             sub_topic = self.get_parameter('sub_topic').get_parameter_value().string_value
@@ -58,7 +58,7 @@ class Filter(Node):
 
     def pointcloud_callback(self, pointcloud_msg):
         pcl_msg = PointCloud2()
-        pcl_msg.header.frame_id = pointcloud_msg.header.frame_id
+        pcl_msg.header.frame_id =pointcloud_msg.header.frame_id #"alpha_rise/ping360_link"#
         pcl_msg.header.stamp = pointcloud_msg.header.stamp
         
         pcl_msg.fields = pointcloud_msg.fields
