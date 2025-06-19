@@ -19,7 +19,7 @@
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
         # Add your sources here
-        observation_sources: pointcloud
+        observation_sources: pointcloud_sf
 
         #Stonefish
         pointcloud_sf:
