@@ -79,6 +79,8 @@ class PathGen(Node):
         self.best_point_pub = self.create_publisher(Point, f"{path_topic}/best_point", 10)
         self.obstacle_distance_pub = self.create_publisher(Float32, f"{path_topic}/distance_to_obstacle", 10)
         self.image_process_pipeline_pub = self.create_publisher(Image, f"{path_topic}/image", 10)
+        self.costmap_image_pub = self.create_publisher(Image, f"costmap/local/image", 10)
+
         self.bridge = CvBridge()
         
         #TF Buffer and Listener
@@ -109,7 +111,7 @@ class PathGen(Node):
         else:
             self.get_logger().error(f'Failed to perform transition: {label}')
 
-        time.sleep(1)
+        time.sleep(3)
         req.transition.id = Transition.TRANSITION_ACTIVATE
         label = "ACTIVATE"
         future = self.client.call_async(req)
@@ -172,6 +174,9 @@ class PathGen(Node):
         dilate = cv2.dilate(dilate, (5,5), 2)
         dilate = cv2.dilate(dilate, (5,5), 2)
         dilate = cv2.dilate(dilate, (5,5), 2)
+
+        costmap_image_ros = self.bridge.cv2_to_imgmsg(data)
+        self.costmap_image_pub.publish(costmap_image_ros)
 
         """
         Edges, Lines and Curves
