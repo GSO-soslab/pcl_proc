@@ -190,6 +190,7 @@ class Wp_Admin(Node):
                     n_points_above_vx += 1 
 
             if self.state == "survey":
+                self.get_logger().info(f"Following Mode in {self.state}", throttle_duration_sec = 3)
 
                 if msg.poses != self.poses:
                     
@@ -200,7 +201,6 @@ class Wp_Admin(Node):
                     
                     #Feed best point.
                     if(time.time() - self.follow_mode_timer) < self.follow_mode_timer_param:
-                        self.get_logger().info("Following Mode", throttle_duration_sec = 3)
                         self.bool_search_mode = False
                         best_point = Point32()
                         best_point.x = self.x
@@ -218,7 +218,7 @@ class Wp_Admin(Node):
 
             #Iceberg Reacquisition Mode is when 
             #the vehicle reaches end of a valid path.
-            elif n_points_above_vx <= 3: #self.state == "start":     
+            elif n_points_above_vx <= 3 or self.state == "start":     
                 self.iceberg_reacquisition_mode(wp)
         
         #Path is still published when no costmap. But the n_points is 1 (vx_x, vx_y)
@@ -353,11 +353,12 @@ class Wp_Admin(Node):
         so as to reacquire acoustic contact
         """
         #Switch state to survey_3d
-        request = ChangeState.Request()
-        request.state = "survey"
-        request.caller = self.node_name
-        future = self.change_state_service_client.call_async(request)
-        future.add_done_callback(self.get_state_callback)
+        if self.state == "start":
+            request = ChangeState.Request()
+            request.state = "survey"
+            request.caller = self.node_name
+            future = self.change_state_service_client.call_async(request)
+            future.add_done_callback(self.get_state_callback)
         #The center point of the circle in vx frame
         point_of_obstacle = [self.reacquisition_s_param*self.standoff_distance_in_meters, -self.standoff_distance_in_meters]
         corner_bhvr_points = self.draw_arc(number_of_points=self.n_points, 
@@ -373,7 +374,6 @@ class Wp_Admin(Node):
             msg.y = corner_bhvr_points[i].point.y
             msg.z = self.depth
             wp.polygon.points.append(msg)
-        # rospy.loginfo_throttle(3,"Iceberg Reacquisition Mode")
         self.get_logger().info("Iceberg Reacquisition Mode", throttle_duration_sec = 3)
         self.pub_update.publish(wp)
 
