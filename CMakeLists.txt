@@ -55,6 +55,10 @@ install(PROGRAMS
   pcl_proc/wp_admin.py
   DESTINATION lib/${PROJECT_NAME})
 
+install(PROGRAMS
+  pcl_proc/loop.py
+  DESTINATION lib/${PROJECT_NAME})
+
 install(DIRECTORY pcl_proc/
   DESTINATION lib/${PROJECT_NAME}
   USE_SOURCE_PERMISSIONS
