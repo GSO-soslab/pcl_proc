@@ -776,7 +776,7 @@ class PathGen(Node):
                     
                     # Broadcast Odom-> Edge Frame TF
                     odom_costmap_tf = TransformStamped()
-                    # odom_costmap_tf.header.stamp = rospy.Time.now()
+                    odom_costmap_tf.header.stamp = self.time
                     odom_costmap_tf.header.frame_id = 'alpha_rise/odom'
                     odom_costmap_tf.child_frame_id = 'alpha_rise/costmap/edge_frame'
                     odom_costmap_tf.transform.translation.x = self.new_origin[0]
@@ -791,7 +791,7 @@ class PathGen(Node):
 
                     # Broadcast Edge Frame-> Line Frame TF
                     odom_costmap_tf = TransformStamped()
-                    # odom_costmap_tf.header.stamp = rospy.Time.now()
+                    odom_costmap_tf.header.stamp = self.time
                     odom_costmap_tf.header.frame_id = 'alpha_rise/costmap/edge_frame'
                     odom_costmap_tf.child_frame_id = 'alpha_rise/costmap/line_frame'
                     odom_costmap_tf.transform.translation.x = np.float64(0)
