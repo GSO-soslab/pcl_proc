@@ -190,8 +190,6 @@ class Wp_Admin(Node):
                     n_points_above_vx += 1 
 
             if self.state == "survey":
-                self.get_logger().info(f"Following Mode in {self.state}", throttle_duration_sec = 3)
-
                 if msg.poses != self.poses:
                     
                     #grab time of follow_mode initializing
@@ -199,6 +197,8 @@ class Wp_Admin(Node):
                         self.follow_mode_timer = time.time()
                         self.follow_flag =+ 1
                     
+                    self.get_logger().info(f"Following Mode in {self.state} with {round(self.follow_mode_timer_param - (time.time() - self.follow_mode_timer))}s remaining", throttle_duration_sec = 15)
+
                     #Feed best point.
                     if(time.time() - self.follow_mode_timer) < self.follow_mode_timer_param:
                         self.bool_search_mode = False
