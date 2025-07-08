@@ -1,13 +1,19 @@
 /alpha_rise/waypoint_admin:
   ros__parameters:
+    # Topics & Services
     update_waypoint_topic: "/alpha_rise/mvp_helm/bhv_path_following/update_waypoints"
     odom_topic: "/alpha_rise/odometry/filtered"
     get_state_service: "/alpha_rise/mvp_helm/get_state"
     change_state_service: "/alpha_rise/mvp_helm/change_state"
     get_waypoint_service: "/alpha_rise/bhv_path_following/get_next_waypoints"
+    
+    # Timers
+    ## How often the get_state_service is called.
     check_state_update_rate: 1 #sec
     search_mode_timer: 1200 #sec
     follow_mode_timer: 1500 #sec
+    
+    # Navigation
     fls_beamwidth: 35 #degrees 
     search_mode_initial_radius: 10.0 #m
     exit_mode_distance: 30.0 #m
