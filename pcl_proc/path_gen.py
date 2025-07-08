@@ -176,6 +176,8 @@ class PathGen(Node):
         dilate = cv2.dilate(dilate, (5,5), 2)
 
         costmap_image_ros = self.bridge.cv2_to_imgmsg(data)
+        costmap_image_ros.header.stamp = self.time
+        costmap_image_ros.header.frame_id = self.odom_frame
         self.costmap_image_pub.publish(costmap_image_ros)
 
         """
