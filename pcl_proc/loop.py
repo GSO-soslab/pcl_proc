@@ -18,6 +18,7 @@ from geometry_msgs.msg import TransformStamped, Vector3
 import tf2_ros
 from rclpy.time import Time
 import math
+from rclpy.parameter import Parameter
 
 class Loop(Node):
     def __init__(self):
@@ -34,6 +35,15 @@ class Loop(Node):
         self.revisit = self.create_publisher(Image, "/alpha_rise/costmap/global/match", 10)
         self.iceberg_odom_pub = self.create_publisher(Odometry, "/alpha_rise/iceberg/odometry", 10)
 
+        # Params
+        self.declare_parameter('moment_comparison_threshold', Parameter.Type.DOUBLE)
+        self.declare_parameter('revisit_distance_threshold', Parameter.Type.INTEGER)
+        self.declare_parameter('revisit_match_threshold', Parameter.Type.INTEGER)
+        self.declare_parameter('msis_scan_time', Parameter.Type.DOUBLE)
+        self.moment_comparison_threshold = self.get_parameter('moment_comparison_threshold').value
+        self.revisit_distance_threshold = self.get_parameter('revisit_distance_threshold').value
+        self.revisit_match_threshold = self.get_parameter('revisit_match_threshold').value
+        self.msis_scan_time = self.get_parameter('msis_scan_time').value
 
         self.map = np.zeros((700, 700), dtype=np.uint8)
         
@@ -165,7 +175,7 @@ class Loop(Node):
             )
             self.image_match_pub.publish(self.bridge.cv2_to_imgmsg(matched_img))
     
-    def compare_moment(self, local, best, threshold=1):
+    def compare_moment(self, local, best, threshold):
         """
         Compare two images using Hu Moments to determine similarity.
 
@@ -224,7 +234,7 @@ class Loop(Node):
 
                 matches = self.bf.match(des1, des2)
                 matches = sorted(matches, key=lambda x: x.distance)
-                good_matches = [m for m in matches if m.distance <100] # lower is better.
+                good_matches = [m for m in matches if m.distance <self.revisit_distance_threshold] # lower is better.
 
                 if len(good_matches) > best_matches_count:
                     best_matches_count = len(good_matches)
@@ -232,10 +242,10 @@ class Loop(Node):
                     best_matches = good_matches
                     best_image_kp2 = kp2
 
-            if best_index == -1 or best_matches_count < 2:  # Minimum 2 matches
+            if best_index == -1 or best_matches_count < self.revisit_match_threshold:  # Minimum 2 matches
                 return None
             else:
-                is_similar, hu_distance = self.compare_moment(query_img, img_list[best_index])
+                is_similar, hu_distance = self.compare_moment(query_img, img_list[best_index], self.moment_comparison_threshold)
                 if is_similar:
                     match_img = cv2.drawMatches(query_img, recent_image_kp, cv2.resize(img_list[best_index],(300,300), interpolation=cv2.INTER_CUBIC), best_image_kp2, best_matches, None,
                                                 flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
