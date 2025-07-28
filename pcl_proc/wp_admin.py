@@ -14,9 +14,10 @@ from rclpy.time import Time
 from builtin_interfaces.msg import Duration
 from nav_msgs.msg import Path
 from geometry_msgs.msg import PolygonStamped, Point32, PointStamped, Point
-from std_msgs.msg import Float32, Int16
+from std_msgs.msg import Float32, Int16, Bool
 import math
 from mvp_msgs.srv import  GetState, ChangeState, GetWaypoints
+from mvp_msgs.msg import Waypoints, Waypoint
 import time
 import tf2_ros
 import tf2_geometry_msgs
@@ -58,6 +59,11 @@ class Wp_Admin(Node):
         self.declare_parameter('search_mode_timer', Parameter.Type.INTEGER)
         self.declare_parameter('follow_mode_timer',Parameter.Type.INTEGER)
         self.declare_parameter('exit_mode_distance',Parameter.Type.DOUBLE)
+        self.declare_parameter('follow_mode_surge', Parameter.Type.DOUBLE)
+        self.declare_parameter('reacquisition_surge', Parameter.Type.DOUBLE)
+        self.declare_parameter('search_mode_surge', Parameter.Type.DOUBLE)
+        self.declare_parameter('exit_mode_surge', Parameter.Type.DOUBLE)
+
 
         # Read parameters
         self.search_mode_initial_radius = self.get_parameter('search_mode_initial_radius').get_parameter_value().double_value
@@ -71,14 +77,22 @@ class Wp_Admin(Node):
 
         self.exit_mode_distance = self.get_parameter('exit_mode_distance').get_parameter_value().double_value
 
+        # Surge Params
+        self.follow_mode_surge = self.get_parameter('follow_mode_surge').get_parameter_value().double_value
+        self.reacquisition_surge = self.get_parameter('reacquisition_surge').get_parameter_value().double_value
+        self.exit_mode_surge = self.get_parameter('exit_mode_surge').get_parameter_value().double_value
+        self.search_mode_surge = self.get_parameter('search_mode_surge').get_parameter_value().double_value
+        
         # Declare publishers
-        self.pub_update = self.create_publisher(PolygonStamped, update_waypoint_topic, 1)
+        self.pub_update = self.create_publisher(Waypoints, update_waypoint_topic, 1)
         self.pub_state = self.create_publisher(Int16, path_topic + '/state', 1)
 
         # Declare subscribers
         self.create_subscription(Path, path_topic, self.path_cB, 1)
         self.create_subscription(Float32, path_topic + '/distance_to_obstacle', self.distance_cB, 1)
         self.create_subscription(Point, path_topic + "/best_point", self.point_cB, 1)
+        self.create_subscription(Bool, "/alpha_rise/iceberg/revisit", self.revisit_cB, 1)
+
 
         # Declare services
         self.get_waypoint_service_client = self.create_client(GetWaypoints, self.get_waypoint_service_name)
@@ -101,10 +115,23 @@ class Wp_Admin(Node):
         self.count_concentric_circles = 0
         self.x, self.y = 0.0,0.0
         
+        #Number of loops
+        self.loop = 0
+        
         self.bool_search_mode = False
 
         self.bool_exit_mode = False
-
+        
+    def revisit_cB(self, msg):
+        """
+        Revisit Bool Callback
+        """
+        if msg.data:
+            self.depth = 0
+            self.loop += 1
+        if self.base_to_odom_tf.transform.translation.z == 0:
+            self.depth = self.get_parameter('operating_depth').get_parameter_value().double_value
+            
     def point_cB(self, msg):
         """
         Best point callback.
@@ -173,9 +200,7 @@ class Wp_Admin(Node):
         self.odom_to_base_tf = self.tf_buffer.lookup_transform("alpha_rise/base_link", "alpha_rise/odom", 
                                                                rclpy.time.Time())
         #Create Waypoint Message
-        wp = PolygonStamped()
-        wp.header.stamp = msg.header.stamp
-        wp.header.frame_id = msg.header.frame_id
+        wpts = Waypoints()
         
         # Valid path is n_points long. 
         # Path is always being published.
@@ -202,24 +227,31 @@ class Wp_Admin(Node):
                     #Feed best point.
                     if(time.time() - self.follow_mode_timer) < self.follow_mode_timer_param:
                         self.bool_search_mode = False
-                        best_point = Point32()
+                        
+                        wpt = Waypoint()
+                        wpt.header = msg.header
+                        wpt.u = self.follow_mode_surge
+
+                        best_point = Point()
                         best_point.x = self.x
                         best_point.y = self.y
                         best_point.z = self.depth
-                        wp.polygon.points.append(best_point)
-                        self.pub_update.publish(wp)
+                        wpt.wpt = best_point
+                        wpts.wpt.append(wpt)
+                        # wp.polygon.points.append(best_point)
+                        self.pub_update.publish(wpts)
                         self.poses = msg.poses
                     
                     #Chart a course away from the iceberg when timer runs out.
                     #Go to a point 90 degree port side of Vx
                     else:
                         self.get_logger().info(f"Exit sequence. Timer ran out at {self.follow_mode_timer_param}s")
-                        self.exit_mode(wp)
+                        self.exit_mode(wpts, msg.header)
 
             #Iceberg Reacquisition Mode is when 
             #the vehicle reaches end of a valid path.
             elif n_points_above_vx <= 3 or self.state == "start":     
-                self.iceberg_reacquisition_mode(wp)
+                self.iceberg_reacquisition_mode(wpts, msg.header)
         
         #Path is still published when no costmap. But the n_points is 1 (vx_x, vx_y)
         #We use that parameter to create a new bhvr mode.
@@ -227,7 +259,7 @@ class Wp_Admin(Node):
             # rospy.loginfo("Searching Mode")
             if self.state == "start":
                 self.count_concentric_circles += 1
-                self.search_mode(wp)
+                self.search_mode(wpts, msg.header)
 
             elif self.state == "survey":
                 #If timer runs out, then the node is killed.
@@ -239,13 +271,12 @@ class Wp_Admin(Node):
                     self.destroy_node()
                     rclpy.shutdown()
         
-    def exit_mode(self, wp):
+    def exit_mode(self, wpts, header):
         """
         Function to navigate the vehicle 
         away from the iceberg when the timer runs out.
         """
         self.bool_exit_mode = True
-                
         # Costmap frames only exists if path can be generated. If in Reacquisition mode,
         # then direct away from the iceberg
         if self.tf_buffer.can_transform("alpha_rise/odom",
@@ -272,7 +303,7 @@ class Wp_Admin(Node):
                 
             exit_point_odom_frame = tf2_geometry_msgs.do_transform_point(exit_point, line_frame_to_odom_tf)
             
-            exit_msg = Point32()
+            exit_msg = Point()
             exit_msg.x = exit_point_odom_frame.point.x
             exit_msg.y = exit_point_odom_frame.point.y
             exit_msg.z = np.float64(0)
@@ -286,14 +317,18 @@ class Wp_Admin(Node):
             #Transform to Odom
             exit_point_odom_frame = tf2_geometry_msgs.do_transform_point(exit_point, self.base_to_odom_tf)
 
-            exit_msg = Point32()
+            exit_msg = Point()
             exit_msg.x = exit_point_odom_frame.point.x
             exit_msg.y = exit_point_odom_frame.point.y
             exit_msg.z = np.float64(0)
+        
+        wpt = Waypoint()
+        wpt.header = header
+        wpt.wpt = exit_msg
+        wpt.u = self.exit_mode_surge
+        wpts.wpt.append(wpt)
+        self.pub_update.publish(wpts)
 
-
-        wp.polygon.points.append(exit_msg)
-        self.pub_update.publish(wp)
         msg = Int16()
         msg.data=2
         self.pub_state.publish(msg)
@@ -303,7 +338,7 @@ class Wp_Admin(Node):
                     )
         self.destroy_node()
 
-    def search_mode(self, wp):
+    def search_mode(self, wpts, header):
         self.bool_search_mode = True
 
         #Change here for initial depth.
@@ -331,23 +366,27 @@ class Wp_Admin(Node):
                                             radius = search_mode_radius)
     
         for i in range(len(search_mode_points)):
-            msg = Point32()
+            wpt = Waypoint()
+            wpt.header = header
+            msg = Point()
             msg.x = search_mode_points[i].point.x
             msg.y = search_mode_points[i].point.y
             msg.z = search_mode_depth
-            wp.polygon.points.append(msg)
+            wpt.wpt = msg
+            wpt.u = self.search_mode_surge
+            wpts.wpt.append(wpt)
 
         request = ChangeState.Request()
         request.state = "survey"
         request.caller = self.node_name
         future = self.change_state_service_client.call_async(request)
         future.add_done_callback(self.get_state_callback)
-        self.pub_update.publish(wp)
+        self.pub_update.publish(wpts)
         self.get_logger().info("Search Mode", throttle_duration_sec = 3)
         self.state = "survey"
         time.sleep(1)
 
-    def iceberg_reacquisition_mode(self, wp):
+    def iceberg_reacquisition_mode(self, wpts, header):
         """
         Function to navigate the vehicle 
         so as to reacquire acoustic contact
@@ -369,13 +408,19 @@ class Wp_Admin(Node):
     
         #Append the waypoints
         for i in range(len(corner_bhvr_points)):
-            msg =Point32()
+            wpt = Waypoint()
+            wpt.header = header
+            wpt.u = self.reacquisition_surge
+            
+            msg = Point()
             msg.x = corner_bhvr_points[i].point.x 
             msg.y = corner_bhvr_points[i].point.y
             msg.z = self.depth
-            wp.polygon.points.append(msg)
+            wpt.wpt = msg
+      
+            wpts.wpt.append(wpt)
         self.get_logger().info("Iceberg Reacquisition Mode", throttle_duration_sec = 3)
-        self.pub_update.publish(wp)
+        self.pub_update.publish(wpts)
 
     def check_state(self):
         """
