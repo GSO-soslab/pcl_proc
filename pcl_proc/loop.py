@@ -19,6 +19,7 @@ import tf2_ros
 from rclpy.time import Time
 import math
 from rclpy.parameter import Parameter
+from std_srvs.srv import SetBool
 
 class Loop(Node):
     def __init__(self):
@@ -35,16 +36,19 @@ class Loop(Node):
         self.revisit = self.create_publisher(Image, "/alpha_rise/costmap/global/match", 10)
         self.iceberg_odom_pub = self.create_publisher(Odometry, "/alpha_rise/iceberg/odometry", 10)
 
+        self.iceberg_revisit_client = self.create_client(SetBool, "/alpha_rise/iceberg/revisit")
+
         # Params
         self.declare_parameter('moment_comparison_threshold', Parameter.Type.DOUBLE)
         self.declare_parameter('revisit_distance_threshold', Parameter.Type.INTEGER)
         self.declare_parameter('revisit_match_threshold', Parameter.Type.INTEGER)
         self.declare_parameter('msis_scan_time', Parameter.Type.DOUBLE)
+        self.declare_parameter('enable_loop_detect', Parameter.Type.BOOL)
         self.moment_comparison_threshold = self.get_parameter('moment_comparison_threshold').value
         self.revisit_distance_threshold = self.get_parameter('revisit_distance_threshold').value
         self.revisit_match_threshold = self.get_parameter('revisit_match_threshold').value
         self.msis_scan_time = self.get_parameter('msis_scan_time').value
-
+        self.enable_loop_detect = self.get_parameter('enable_loop_detect').value
         self.map = np.zeros((700, 700), dtype=np.uint8)
         
         self.bridge = CvBridge()
@@ -215,7 +219,8 @@ class Loop(Node):
         if oldest_n > 4:
             query_img = cv2.resize(query_img, (300,300),interpolation=cv2.INTER_CUBIC)
             recent_image_kp, des1 = self.akaze.detectAndCompute(query_img,None)
-
+            request = SetBool.Request()
+            request.data = False
             best_index = -1
             best_matches_count = 0
             best_matches = None
@@ -246,12 +251,20 @@ class Loop(Node):
                 return None
             else:
                 is_similar, hu_distance = self.compare_moment(query_img, img_list[best_index], self.moment_comparison_threshold)
-                if is_similar:
+                
+                if is_similar and self.enable_loop_detect:
                     match_img = cv2.drawMatches(query_img, recent_image_kp, cv2.resize(img_list[best_index],(300,300), interpolation=cv2.INTER_CUBIC), best_image_kp2, best_matches, None,
                                                 flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
                     
                     self.revisit.publish(self.bridge.cv2_to_imgmsg(match_img))
-                    print(hu_distance, self.state)
+                    # print(hu_distance, self.state)
+                    request.data = True
+                    future = self.client.call_async(request)
+                    future.add_done_callback(self.is_revisit_callback)
+
+    def get_state_callback(self, future):
+        response = future.result()
+
 
 
     def create_global_map(self, large_img, small_img, small_center_coords):
