@@ -9,12 +9,11 @@
 import rclpy
 from rclpy.parameter import Parameter
 from rclpy.node import Node
-from rclpy.executors import MultiThreadedExecutor
-from rclpy.time import Time
-from builtin_interfaces.msg import Duration
 from nav_msgs.msg import Path
-from geometry_msgs.msg import PolygonStamped, Point32, PointStamped, Point
-from std_msgs.msg import Float32, Int16, Bool
+from sensor_msgs.msg import NavSatFix
+from geometry_msgs.msg import PointStamped, Point
+from std_msgs.msg import Float32, Int16
+from std_srvs.srv import SetBool
 import math
 from mvp_msgs.srv import  GetState, ChangeState, GetWaypoints
 from mvp_msgs.msg import Waypoints, Waypoint
@@ -91,14 +90,14 @@ class Wp_Admin(Node):
         self.create_subscription(Path, path_topic, self.path_cB, 1)
         self.create_subscription(Float32, path_topic + '/distance_to_obstacle', self.distance_cB, 1)
         self.create_subscription(Point, path_topic + "/best_point", self.point_cB, 1)
-        self.create_subscription(Bool, "/alpha_rise/iceberg/revisit", self.revisit_cB, 1)
-
+        self.create_subscription(NavSatFix, "/alpha_rise/gps/fix", self.gps_callback, 11)
 
         # Declare services
         self.get_waypoint_service_client = self.create_client(GetWaypoints, self.get_waypoint_service_name)
         self.get_state_service_client = self.create_client(GetState, self.get_state_service_name)
         self.change_state_service_client = self.create_client(ChangeState, self.change_state_service_name)
-
+        
+        self.create_service(SetBool, '/alpha_rise/iceberg/revisit', self.revisit_service_cb)
         
         #Declare variables
         self.state = None
@@ -121,16 +120,44 @@ class Wp_Admin(Node):
         self.bool_search_mode = False
 
         self.bool_exit_mode = False
-        
-    def revisit_cB(self, msg):
+    
+    def gps_callback(self, msg):
         """
-        Revisit Bool Callback
+        GPS Callback
         """
-        if msg.data:
-            self.depth = 0
+        # print(msg.status.status, flush=True)
+        if msg.status.status == 0:
+            if self.follow_flag != 0 and self.loop != 0:
+                self.depth = self.get_parameter('operating_depth').get_parameter_value().double_value
+
+                wpts = Waypoints()
+                wpt = Waypoint()
+                wpt.header.stamp = msg.header.stamp
+                wpt.header.frame_id = 'alpha_rise/odom'
+                wpt.u = self.get_parameter('search_mode_surge').get_parameter_value().double_value
+
+                best_point = Point()
+                best_point.x = self.x
+                best_point.y = self.y
+                best_point.z = self.depth
+                wpt.wpt = best_point
+                wpts.wpt.append(wpt)
+                # wp.polygon.points.append(best_point)
+                self.pub_update.publish(wpts)
+                print(f"GPS Fix. Diving to {self.depth} with surge of {self.follow_mode_surge}",flush=True)
+
+    def revisit_service_cb(self, request, response):
+        if request.data:
+            self.depth = -0.0
             self.loop += 1
-        if self.base_to_odom_tf.transform.translation.z == 0:
-            self.depth = self.get_parameter('operating_depth').get_parameter_value().double_value
+            self.follow_mode_surge = 0.1
+            response.success = True
+            response.message = "Revisit triggered and state updated."
+            print(response.message, flush=True)
+        else:
+            response.success = False
+            response.message = "Revisit not triggered (request.data was False)."
+        return response
             
     def point_cB(self, msg):
         """
@@ -478,11 +505,6 @@ def main():
     node = Wp_Admin()
     rclpy.spin(node)
     rclpy.shutdown()
-
-    # executor = MultiThreadedExecutor()
-    # executor.add_node(node)
-    # executor.spin()
-    # rclpy.shutdown()
-
+    
 if __name__ == "__main__":
     main()

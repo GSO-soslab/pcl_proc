@@ -11,7 +11,7 @@
     ## How often the get_state_service is called.
     check_state_update_rate: 1 #sec
     search_mode_timer: 1200 #sec
-    follow_mode_timer: 1000 #sec
+    follow_mode_timer: 3000 #sec
     
     # Navigation
     fls_beamwidth: 35 #degrees 
