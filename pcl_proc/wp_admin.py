@@ -48,7 +48,6 @@ class Wp_Admin(Node):
         self.n_points = self.get_parameter('n_points').get_parameter_value().integer_value
         self.reacquisition_s_param = self.get_parameter('reacquisition_s_param').get_parameter_value().double_value
         self.update_rate = self.get_parameter('check_state_update_rate').get_parameter_value().integer_value
-        self.depth = self.get_parameter('operating_depth').get_parameter_value().double_value
         self.clear_entire_costmap_name = "/alpha_rise/clear_entirely_costmap"
 
         #To remove surface reflections from FLS, this is the min depth, the vehicle must be at.
@@ -144,10 +143,11 @@ class Wp_Admin(Node):
         On this service call, either by loop detection or timeout, 
         go to exit mode
         """
+        wpts = Waypoints()
         if request.data:
-            wpts = Waypoints()
             response.success = True
             response.message = "Revisit triggered."
+            self.loop += 1
         else:
             response.success = False
             response.message = "Revisit not triggered"
@@ -214,88 +214,95 @@ class Wp_Admin(Node):
         The behaviours are implemented.
         """
         if self.mission_command == "START" or self.mission_command == "RESTART":
+            self.depth = self.get_parameter('operating_depth').get_parameter_value().double_value
+            self.mission_core(msg)
+        
+        elif self.mission_command == "CONTINUE":
+            self.depth = (self.loop+1)*self.get_parameter('operating_depth').get_parameter_value().double_value
+            self.mission_core(msg)
+        
+    def mission_core(self, msg):
+        #Vx position and bearing in Odom frame.
+        self.base_to_odom_tf = self.tf_buffer.lookup_transform("alpha_rise/odom", "alpha_rise/base_link", 
+                                                            rclpy.time.Time())
+        
+        #Odom frame point in Vx frame
+        self.odom_to_base_tf = self.tf_buffer.lookup_transform("alpha_rise/base_link", "alpha_rise/odom", 
+                                                            rclpy.time.Time())
+        #Create Waypoint Message
+        wpts = Waypoints()
+        self.header = msg.header
+        # Valid path is n_points long. 
+        # Path is always being published.
+        # If same path, then no new path is then published.
+        if len(msg.poses) == self.n_points:
             
-            #Vx position and bearing in Odom frame.
-            self.base_to_odom_tf = self.tf_buffer.lookup_transform("alpha_rise/odom", "alpha_rise/base_link", 
-                                                                rclpy.time.Time())
-            
-            #Odom frame point in Vx frame
-            self.odom_to_base_tf = self.tf_buffer.lookup_transform("alpha_rise/base_link", "alpha_rise/odom", 
-                                                                rclpy.time.Time())
-            #Create Waypoint Message
-            wpts = Waypoints()
-            self.header = msg.header
-            # Valid path is n_points long. 
-            # Path is always being published.
-            # If same path, then no new path is then published.
-            if len(msg.poses) == self.n_points:
-                
-                #Check number of points in front of the vehicle
-                n_points_above_vx = 0
-                for pose in msg.poses:
-                    path_vx_frame = tf2_geometry_msgs.do_transform_pose_stamped(pose, self.odom_to_base_tf)
-                    if path_vx_frame.pose.position.x > 0:
-                        n_points_above_vx += 1 
+            #Check number of points in front of the vehicle
+            n_points_above_vx = 0
+            for pose in msg.poses:
+                path_vx_frame = tf2_geometry_msgs.do_transform_pose_stamped(pose, self.odom_to_base_tf)
+                if path_vx_frame.pose.position.x > 0:
+                    n_points_above_vx += 1 
 
-                if self.state == "survey":
-                    if msg.poses != self.poses:
-                        self.search_mode_timer = time.time()
-                        #grab time of follow_mode initializing
-                        if self.follow_flag == 0:
-                            self.follow_mode_timer = time.time()
-                            self.follow_flag =+ 1
+            if self.state == "survey":
+                if msg.poses != self.poses:
+                    self.search_mode_timer = time.time()
+                    #grab time of follow_mode initializing
+                    if self.follow_flag == 0:
+                        self.follow_mode_timer = time.time()
+                        self.follow_flag =+ 1
+                    
+                    self.get_logger().info(f"Following Mode in {self.state} with {round(self.follow_mode_timer_param - (time.time() - self.follow_mode_timer))}s remaining", throttle_duration_sec = 15)
+
+                    #Feed best point.
+                    if(time.time() - self.follow_mode_timer) < self.follow_mode_timer_param:
+                        self.bool_search_mode = False
                         
-                        self.get_logger().info(f"Following Mode in {self.state} with {round(self.follow_mode_timer_param - (time.time() - self.follow_mode_timer))}s remaining", throttle_duration_sec = 15)
+                        wpt = Waypoint()
+                        wpt.header = msg.header
+                        wpt.u = self.follow_mode_surge
 
-                        #Feed best point.
-                        if(time.time() - self.follow_mode_timer) < self.follow_mode_timer_param:
-                            self.bool_search_mode = False
-                            
-                            wpt = Waypoint()
-                            wpt.header = msg.header
-                            wpt.u = self.follow_mode_surge
+                        best_point = Point()
+                        best_point.x = self.x
+                        best_point.y = self.y
+                        best_point.z = self.depth
+                        wpt.wpt = best_point
+                        wpts.wpt.append(wpt)
+                        # wp.polygon.points.append(best_point)
+                        self.pub_update.publish(wpts)
+                        self.poses = msg.poses
+                    
+                    #Chart a course away from the iceberg when timer runs out.
+                    #Go to a point 90 degree port side of Vx
+                    else:
+                        self.get_logger().info(f"Exit sequence. Timer ran out at {self.follow_mode_timer_param}s")
+                        self.exit_mode(wpts, info = f"Mission completed. Timeout of {self.follow_mode_timer_param}s.")
 
-                            best_point = Point()
-                            best_point.x = self.x
-                            best_point.y = self.y
-                            best_point.z = self.depth
-                            wpt.wpt = best_point
-                            wpts.wpt.append(wpt)
-                            # wp.polygon.points.append(best_point)
-                            self.pub_update.publish(wpts)
-                            self.poses = msg.poses
-                        
-                        #Chart a course away from the iceberg when timer runs out.
-                        #Go to a point 90 degree port side of Vx
-                        else:
-                            self.get_logger().info(f"Exit sequence. Timer ran out at {self.follow_mode_timer_param}s")
-                            self.exit_mode(wpts, info = f"Mission completed. Timeout of {self.follow_mode_timer_param}s.")
+            #Iceberg Reacquisition Mode is when 
+            #the vehicle reaches end of a valid path.
+            elif n_points_above_vx <= 3 or self.state == "start":     
+                self.iceberg_reacquisition_mode(wpts)
+        
+        #Path is still published when no costmap. But the n_points is 1 (vx_x, vx_y)
+        #We use that parameter to create a new bhvr mode.
+        else:
+            # rospy.loginfo("Searching Mode")
+            if self.state == "start":
+                self.count_concentric_circles += 1
+                self.search_mode(wpts)
 
-                #Iceberg Reacquisition Mode is when 
-                #the vehicle reaches end of a valid path.
-                elif n_points_above_vx <= 3 or self.state == "start":     
-                    self.iceberg_reacquisition_mode(wpts)
-            
-            #Path is still published when no costmap. But the n_points is 1 (vx_x, vx_y)
-            #We use that parameter to create a new bhvr mode.
-            else:
-                # rospy.loginfo("Searching Mode")
-                if self.state == "start":
-                    self.count_concentric_circles += 1
-                    self.search_mode(wpts)
+            elif self.state == "survey":
+                #If timer runs out, then the node is killed.
+                if(time.time() - self.search_mode_timer) > self.search_mode_timer_param: #sec
+                    request = ChangeState.Request()
+                    request.state = "start"
+                    request.caller = self.node_name
+                    future = self.change_state_service_client.call_async(request)
+                    future.add_done_callback(self.get_state_callback)
 
-                elif self.state == "survey":
-                    #If timer runs out, then the node is killed.
-                    if(time.time() - self.search_mode_timer) > self.search_mode_timer_param: #sec
-                        request = ChangeState.Request()
-                        request.state = "start"
-                        request.caller = self.node_name
-                        future = self.change_state_service_client.call_async(request)
-                        future.add_done_callback(self.get_state_callback)
-
-                        self.get_logger().warn("Search Mode Took too long --shutting down")
-                        self.destroy_node()
-                        rclpy.shutdown()
+                    self.get_logger().warn("Search Mode Took too long --shutting down")
+                    self.destroy_node()
+                    rclpy.shutdown()
             
     def exit_mode(self, wpts, info):
         """

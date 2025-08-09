@@ -21,7 +21,7 @@
     search_mode_surge: 0.3 #m/s
 
     exit_mode_surge: 0.8 #m/s
-    exit_mode_distance: 30.0 #m
+    exit_mode_distance: 20.0 #m
 
     reacquisition_s_param: 0.5
     reacquisition_surge: 0.3 #m/s
@@ -29,4 +29,4 @@
     stand_off_distance: 20.0
     n_points: 20
     operating_depth: -15.0
-    follow_mode_surge: 0.5 #m/s
+    follow_mode_surge: 0.8 #m/s
