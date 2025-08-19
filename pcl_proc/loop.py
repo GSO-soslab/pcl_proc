@@ -5,7 +5,7 @@
 #Tries to estimates iceberg velocity.
 #tony.jacob@uri.edu
 
-#ros2 bag record /alpha_rise/costmap/local/image /alpha_rise/odometry/filtered /alpha_rise/path/state /alpha_rise/stonefish/msis/data/pointcloud/filtered /alpha_rise/fls/pointcloud /iceberg/odometry /tf
+#ros2 bag record /alpha_rise/costmap/local/image /alpha_rise/odometry/filtered /alpha_rise/path/state /alpha_rise/stonefish/msis/data/pointcloud/filtered /alpha_rise/fls/pointcloud /iceberg/odometry /tf /tf_static /alpha_rise/iceberg/odometry /alpha_rise/costmap/global/match /alpha_rise/costmap/global/image /alpha_rise/path/distance_to_obstacle /alpha_rise/costmap /alpha_rise/controller/process/set_point /alpha_rise/controller/process/value
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
@@ -20,6 +20,8 @@ from rclpy.time import Time
 import math
 from rclpy.parameter import Parameter
 from std_srvs.srv import SetBool
+from sklearn.cluster import KMeans
+from sklearn.metrics.pairwise import cosine_similarity
 
 class Loop(Node):
     def __init__(self):
@@ -40,15 +42,12 @@ class Loop(Node):
 
         # Params
         self.declare_parameter('moment_comparison_threshold', Parameter.Type.DOUBLE)
-        self.declare_parameter('revisit_distance_threshold', Parameter.Type.INTEGER)
-        self.declare_parameter('revisit_match_threshold', Parameter.Type.INTEGER)
         self.declare_parameter('msis_scan_time', Parameter.Type.DOUBLE)
-        self.declare_parameter('enable_loop_detect', Parameter.Type.BOOL)
+        self.declare_parameter('cosine_similarity_threshold', Parameter.Type.DOUBLE)
+
         self.moment_comparison_threshold = self.get_parameter('moment_comparison_threshold').value
-        self.revisit_distance_threshold = self.get_parameter('revisit_distance_threshold').value
-        self.revisit_match_threshold = self.get_parameter('revisit_match_threshold').value
         self.msis_scan_time = self.get_parameter('msis_scan_time').value
-        self.enable_loop_detect = self.get_parameter('enable_loop_detect').value
+        self.cosine_similarity_threshold = self.get_parameter('cosine_similarity_threshold').value
         self.map = np.zeros((700, 700), dtype=np.uint8)
         
         self.bridge = CvBridge()
@@ -66,6 +65,7 @@ class Loop(Node):
         self.list_of_local_maps = []
         self.list_of_vx_in_odom = []
         self.list_of_iceberg_frame_time_in_odom = []
+        self.best_index = -1
 
         self.tf_buffer = tf2_ros.Buffer()
         listener = tf2_ros.TransformListener(self.tf_buffer,self)
@@ -118,66 +118,66 @@ class Loop(Node):
 
             # Sort matches by descriptor distance
             matches = sorted(matches, key=lambda x: x.distance)
+            if len(matches) >4:
+                # Extract matched keypoints
+                pts1 = np.float32([kp1[m.queryIdx].pt for m in matches])
+                pts2 = np.float32([kp2[m.trainIdx].pt for m in matches])
+                
+                # Estimate affine transform
+                matrix, inliers = cv2.estimateAffinePartial2D(pts1, pts2)
 
-            # Extract matched keypoints
-            pts1 = np.float32([kp1[m.queryIdx].pt for m in matches])
-            pts2 = np.float32([kp2[m.trainIdx].pt for m in matches])
-            
-            # Estimate affine transform
-            matrix, inliers = cv2.estimateAffinePartial2D(pts1, pts2)
+                if matrix is None:
+                    raise RuntimeError("Affine transformation could not be estimated")
 
-            if matrix is None:
-                raise RuntimeError("Affine transformation could not be estimated")
+                # Extract translation and rotation from affine matrix
+                dx = matrix[0, 2]
+                dy = matrix[1, 2]
 
-            # Extract translation and rotation from affine matrix
-            dx = matrix[0, 2]
-            dy = matrix[1, 2]
+                # Calculate rotation angle in radians
+                yaw = np.arctan2(matrix[1, 0], matrix[0, 0])
 
-            # Calculate rotation angle in radians
-            yaw = np.arctan2(matrix[1, 0], matrix[0, 0])
+                # Convert to Odom Frame
+                """
+                ------->x IMAGE
+                |       x
+                |    _|
+                |    y ODOM
+                v y
+                """
+                #Odometry X = - Image Y * resolution/3 
+                #Odometry Y = - Image X * resolution/3
+                #Odometry Yaw = pi/2 - Image Yaw
+                odom_dx = -dy/3*self.resolution
+                odom_dy = -dx/3*self.resolution
+                odom_yaw = -(yaw + math.pi / 2)
 
-            # Convert to Odom Frame
-            """
-            ------->x IMAGE
-            |       x
-            |    _|
-            |    y ODOM
-            v y
-            """
-            #Odometry X = - Image Y * resolution/3 
-            #Odometry Y = - Image X * resolution/3
-            #Odometry Yaw = pi/2 - Image Yaw
-            odom_dx = -dy/3*self.resolution
-            odom_dy = -dx/3*self.resolution
-            odom_yaw = -(yaw + math.pi / 2)
+                delta_time = self.list_of_iceberg_frame_time_in_odom[-1].sec - self.list_of_iceberg_frame_time_in_odom[-2].sec
 
-            delta_time = self.list_of_iceberg_frame_time_in_odom[-1].sec - self.list_of_iceberg_frame_time_in_odom[-2].sec
+                x_dot = odom_dx/delta_time
+                y_dot = odom_dy/delta_time
+                yaw_dot = odom_yaw/delta_time
 
-            x_dot = odom_dx/delta_time
-            y_dot = odom_dy/delta_time
-            yaw_dot = odom_yaw/delta_time
+                iceberg_odom_msg = Odometry()
+                iceberg_odom_msg.header.frame_id = "alpha_rise/odom"
+                iceberg_odom_msg.header.stamp = self.list_of_iceberg_frame_time_in_odom[-1]
 
-            iceberg_odom_msg = Odometry()
-            iceberg_odom_msg.header.frame_id = "alpha_rise/odom"
-            iceberg_odom_msg.header.stamp = self.list_of_iceberg_frame_time_in_odom[-1]
+                iceberg_odom_msg.child_frame_id = "alpha_rise/iceberg"
+                iceberg_odom_msg.pose.pose.position.x = self.edge_odom_tf.transform.translation.x
+                iceberg_odom_msg.pose.pose.position.y = self.edge_odom_tf.transform.translation.y
+                iceberg_odom_msg.pose.pose.position.z = self.edge_odom_tf.transform.translation.z
+                iceberg_odom_msg.twist.twist.linear = Vector3(x=x_dot, y=y_dot, z=0.0)
+                iceberg_odom_msg.twist.twist.angular = Vector3(x=0.0, y=0.0, z=yaw_dot)
 
-            iceberg_odom_msg.child_frame_id = "alpha_rise/iceberg"
-            iceberg_odom_msg.pose.pose.position.x = self.edge_odom_tf.transform.translation.x
-            iceberg_odom_msg.pose.pose.position.y = self.edge_odom_tf.transform.translation.y
-            iceberg_odom_msg.pose.pose.position.z = self.edge_odom_tf.transform.translation.z
-            iceberg_odom_msg.twist.twist.linear = Vector3(x=x_dot, y=y_dot, z=0.0)
-            iceberg_odom_msg.twist.twist.angular = Vector3(x=0.0, y=0.0, z=yaw_dot)
+                self.iceberg_odom_pub.publish(iceberg_odom_msg)
 
-            self.iceberg_odom_pub.publish(iceberg_odom_msg)
-
-            # Draw good matches
-            matched_img = cv2.drawMatches(
-                recent, kp1,
-                latest, kp2,
-                matches, None,
-                flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
-            )
-            self.image_match_pub.publish(self.bridge.cv2_to_imgmsg(matched_img))
+                # Draw good matches
+                matched_img = cv2.drawMatches(
+                    recent, kp1,
+                    latest, kp2,
+                    matches, None,
+                    flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
+                )
+                self.image_match_pub.publish(self.bridge.cv2_to_imgmsg(matched_img))
     
     def compare_moment(self, local, best, threshold):
         """
@@ -216,56 +216,73 @@ class Loop(Node):
         return is_similar, hu_distance
     
     def is_revisit(self, query_img, img_list, oldest_n):
-        if oldest_n > 4:
-            query_img = cv2.resize(query_img, (300,300),interpolation=cv2.INTER_CUBIC)
-            recent_image_kp, des1 = self.akaze.detectAndCompute(query_img,None)
-            request = SetBool.Request()
-            request.data = False
-            best_index = -1
-            best_matches_count = 0
-            best_matches = None
-            best_image_kp2 = None
+        if len(img_list) > 4 :
 
-            if oldest_n <= 0:
-                return None # invalid parameter
+            # Compute BoW histogram for the query image
+            query_hist = self.get_bow_histogram(query_img)
 
-            end_idx = min(oldest_n, len(img_list))  # In case oldest_n > total images
+            best_score = -1  # Lowest possible similarity
+            
+            # Step 1: Find best match based on cosine similarity
+            if self.best_index == -1:
+                for i in range(oldest_n):
+                    hist = self.get_bow_histogram(img_list[i])
+                    if hist is None:
+                        continue
 
-            for i in range(end_idx):
-                img = img_list[i]
-                kp2, des2 = self.akaze.detectAndCompute(cv2.resize(img, (300,300),interpolation=cv2.INTER_CUBIC), None)
-                if des2 is None:
-                    continue
+                    score = round(cosine_similarity(query_hist.reshape(1, -1), hist.reshape(1, -1))[0][0],2)
 
-                matches = self.bf.match(des1, des2)
-                matches = sorted(matches, key=lambda x: x.distance)
-                good_matches = [m for m in matches if m.distance <self.revisit_distance_threshold] # lower is better.
-
-                if len(good_matches) > best_matches_count:
-                    best_matches_count = len(good_matches)
-                    best_index = i
-                    best_matches = good_matches
-                    best_image_kp2 = kp2
-
-            if best_index == -1 or best_matches_count < self.revisit_match_threshold:  # Minimum 2 matches
-                return None
-            else:
-                is_similar, hu_distance = self.compare_moment(query_img, img_list[best_index], self.moment_comparison_threshold)
+                    if score > best_score and score >= self.cosine_similarity_threshold:
+                        best_score = score
+                        self.best_index = i
                 
-                if is_similar and self.enable_loop_detect:
-                    match_img = cv2.drawMatches(query_img, recent_image_kp, cv2.resize(img_list[best_index],(300,300), interpolation=cv2.INTER_CUBIC), best_image_kp2, best_matches, None,
-                                                flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+                if self.best_index != -1:
+                    print("Got the first match")
+                else:
+                    print("No match found")
+
+            # Step 2: If we have a best_index, check next query image against best_index + 1
+            elif self.best_index != -1:
+                next_index = self.best_index + 1
+
+                next_hist = self.get_bow_histogram(img_list[next_index])
+                query_hist_2 = self.get_bow_histogram(query_img)
+
+                next_score = round(cosine_similarity(query_hist_2.reshape(1, -1), next_hist.reshape(1, -1))[0][0],2)
+            
+                if next_score >= self.cosine_similarity_threshold:
+                    print(f"Second image matched, comparing moments", flush=True)
+
+                    # Both images are revisiting → trigger revisit logic
+                    is_similar, hu_distance = self.compare_moment(query_img, img_list[next_index],threshold=self.moment_comparison_threshold)
                     
-                    self.revisit.publish(self.bridge.cv2_to_imgmsg(match_img))
-                    # print(hu_distance, self.state)
-                    request.data = True
-                    future = self.client.call_async(request)
-                    future.add_done_callback(self.is_revisit_callback)
+                    if is_similar:
+                        print("REVVISSTTT", flush=True)
+                        loop_image = np.hstack((query_img, self.list_of_local_maps[next_index]))
+                        self.revisit.publish(self.bridge.cv2_to_imgmsg(loop_image))
+                        
+                        #Trigger Match
+                        request = SetBool.Request()
+                        request.data = True
+                        future = self.iceberg_revisit_client.call_async(request)
+                        future.add_done_callback(self.get_state_callback)       
+                    else:
+                        print(f"FALSSEE, {hu_distance}", flush=True)
+                    
+                    #reset
+                    self.best_index = -1
+
+                else:
+                    print(f"Second image didnt match well, resetting", flush=True)
+                    self.best_index = -1
 
     def get_state_callback(self, future):
         response = future.result()
+        print(response.message, flush=True)
 
-
+        self.list_of_vx_in_odom.clear()
+        self.list_of_local_maps.clear()
+        self.list_of_iceberg_frame_time_in_odom.clear()
 
     def create_global_map(self, large_img, small_img, small_center_coords):
         large_image_copy = large_img.copy()
@@ -294,6 +311,7 @@ class Loop(Node):
         updated = False
        
         if self.iceberg_tf == False:
+            #The first costmap image sends the TF
             self.start_time = self.iceberg_frame_time_in_odom
             #Publish TF
             self.edge_odom_tf = self.tf_buffer.lookup_transform("alpha_rise/costmap/edge_frame", "alpha_rise/odom", 
@@ -319,12 +337,14 @@ class Loop(Node):
             self.list_of_local_maps.append(small_img)
             self.list_of_vx_in_odom.append((self.vx_x, self.vx_y))
             self.list_of_iceberg_frame_time_in_odom.append(self.iceberg_frame_time_in_odom)
+
             updated = True
 
             print(f"updated; {len(self.list_of_local_maps), len(self.list_of_iceberg_frame_time_in_odom), len(self.list_of_vx_in_odom)}", flush=True)
             self.iceberg_tf = True
 
         if self.iceberg_frame_time_in_odom.sec - self.start_time.sec > 26: #s
+            #The loop that grabs costmap image every msis image
             self.start_time = self.iceberg_frame_time_in_odom
             large_image_copy = large_img
             
@@ -337,9 +357,43 @@ class Loop(Node):
             updated = True
 
             print(f"updated; {len(self.list_of_local_maps), len(self.list_of_iceberg_frame_time_in_odom), len(self.list_of_vx_in_odom)}", flush=True)
-        
+            if len(self.list_of_local_maps) > 70:
+                request = SetBool.Request()
+                request.data = False
+                future = self.iceberg_revisit_client.call_async(request)
+                future.add_done_callback(self.get_state_callback)
+                
         return large_image_copy, updated
 
+
+    def get_bow_histogram(self, img):
+        """
+        Extracts a BoW histogram from an image using AKAZE descriptors and a trained KMeans model.
+
+        Parameters:
+        - kmeans_model (KMeans): Trained KMeans model (visual vocabulary).
+
+        Returns:
+        - hist (np.ndarray): Normalized histogram of visual word frequencies.
+        """
+        # Extract AKAZE descriptors
+        img = cv2.resize(img, (300,300), interpolation=cv2.INTER_CUBIC)
+        keypoints, descriptors = self.akaze.detectAndCompute(img, None)
+        kmeans_model = KMeans(n_clusters=10).fit(descriptors)
+        if descriptors is None or len(descriptors) == 0:
+            # If no descriptors found, return zero histogram
+            return np.zeros(kmeans_model.n_clusters, dtype=float)
+
+        # Assign each descriptor to a visual word (cluster)
+        words = kmeans_model.predict(descriptors)
+
+        # Build histogram
+        hist, _ = np.histogram(words, bins=np.arange(kmeans_model.n_clusters + 1))
+
+        # Normalize histogram
+        hist = hist.astype(float) / np.sum(hist)
+
+        return hist
     
 def main():
     rclpy.init()

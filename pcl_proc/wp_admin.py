@@ -123,6 +123,8 @@ class Wp_Admin(Node):
 
         self.mission_command = "EMPTY"
 
+        self.get_logger().info("Administrator launched. Use /alpha_rise/mission service to engage. START, RESTART or CONTINUE")
+
     def mission_service_cb(self, request, response):
         """
         This service indicates whether to start, restart or continue
