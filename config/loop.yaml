@@ -1,5 +1,5 @@
 /alpha_rise/loop_checker:
   ros__parameters:
-    moment_comparison_threshold: 0.3 #lower is more similiar
-    cosine_similarity_threshold: 0.9 #higher is more similiar
+    max_time_for_one_loop: 2000 #s
+    cosine_similarity_threshold: 0.90 #higher is more similiar
     msis_scan_time: 26.0 #time taken for a new scan image

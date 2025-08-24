@@ -41,13 +41,16 @@ class Loop(Node):
         self.iceberg_revisit_client = self.create_client(SetBool, "/alpha_rise/iceberg/revisit")
 
         # Params
-        self.declare_parameter('moment_comparison_threshold', Parameter.Type.DOUBLE)
         self.declare_parameter('msis_scan_time', Parameter.Type.DOUBLE)
+        self.declare_parameter('max_time_for_one_loop', Parameter.Type.INTEGER)
         self.declare_parameter('cosine_similarity_threshold', Parameter.Type.DOUBLE)
+        # self.declare_parameter('revisit_distance_threshold', Parameter.Type.DOUBLE)
 
-        self.moment_comparison_threshold = self.get_parameter('moment_comparison_threshold').value
         self.msis_scan_time = self.get_parameter('msis_scan_time').value
         self.cosine_similarity_threshold = self.get_parameter('cosine_similarity_threshold').value
+        self.max_time_for_one_loop = self.get_parameter('max_time_for_one_loop').value
+        # self.revisit_distance_threshold = self.get_parameter('revisit_distance_threshold').value
+
         self.map = np.zeros((700, 700), dtype=np.uint8)
         
         self.bridge = CvBridge()
@@ -57,6 +60,7 @@ class Loop(Node):
 
         self.prev_cx_centered = 0
         self.prev_cy_centered = 0
+        self.revisit_count = 0
 
         self.odom_check = False
         self.state = -1
@@ -179,63 +183,43 @@ class Loop(Node):
                 )
                 self.image_match_pub.publish(self.bridge.cv2_to_imgmsg(matched_img))
     
-    def compare_moment(self, local, best, threshold):
-        """
-        Compare two images using Hu Moments to determine similarity.
-
-        Args:
-            local (ndarray): First image (grayscale or binary).
-            best (ndarray): Second image to compare.
-            threshold (float): Distance threshold below which images are considered similar.
-
-        Returns:
-            is_similar (bool): True if Hu moment distance < threshold.
-            hu_distance (float): The computed Hu moment distance.
-        """
-
-        def preprocess_and_get_hu(img):
-            # Convert to binary if needed (assumes grayscale input)
-            _, binary = cv2.threshold(img, 10, 255, cv2.THRESH_BINARY)
-            # Compute moments
-            moments = cv2.moments(binary)
-            # Compute Hu moments
-            hu = cv2.HuMoments(moments)
-            # Log sca le for comparison (add epsilon to avoid log(0))
-            hu_log = -np.sign(hu) * np.log10(np.abs(hu) + 1e-10)
-            return hu_log
-
-        # Get Hu moments
-        hu_local = preprocess_and_get_hu(local)
-        hu_best = preprocess_and_get_hu(best)
-
-        # Compute Euclidean distance between Hu moment vectors
-        hu_distance = np.linalg.norm(hu_local - hu_best)
-        # Compare to threshold
-        is_similar = hu_distance < threshold
-
-        return is_similar, hu_distance
-    
     def is_revisit(self, query_img, img_list, oldest_n):
-        if len(img_list) > 4 :
+        if len(img_list) > 2:
 
             # Compute BoW histogram for the query image
-            query_hist = self.get_bow_histogram(query_img)
+            query_hist, query_descriptors = self.get_histogram_descriptors(query_img, False)
 
             best_score = -1  # Lowest possible similarity
+            best_matches_count = 0
+            best_matches = None
+            best_image_kp2 = None
             
             # Step 1: Find best match based on cosine similarity
             if self.best_index == -1:
                 for i in range(oldest_n):
-                    hist = self.get_bow_histogram(img_list[i])
-                    if hist is None:
-                        continue
+                    best_match_hist, best_match_descriptors = self.get_histogram_descriptors(img_list[i], False)
 
-                    score = round(cosine_similarity(query_hist.reshape(1, -1), hist.reshape(1, -1))[0][0],2)
+                    # score = round(cosine_similarity(query_hist.reshape(1, -1), best_match_hist.reshape(1, -1))[0][0],2)
+                    # #Sort by Cosine of Histogram
+                    # if score > best_score and score >= self.cosine_similarity_threshold:
+                    #     best_score = score
+                    #     self.best_index = i
 
-                    if score > best_score and score >= self.cosine_similarity_threshold:
-                        best_score = score
-                        self.best_index = i
+                    # Match descriptors
+                    matches = self.bf.match(query_descriptors, best_match_descriptors)
+
+                    # Sort matches by descriptor distance
+                    matches = sorted(matches, key=lambda x: x.distance)
+                    good_matches = [m for m in matches if m.distance <len(self.list_of_local_maps)] # lower is better.
                 
+
+                    #Sort by features
+                    if len(good_matches) > best_matches_count:
+                        best_matches_count = len(good_matches)
+                        self.best_index = i
+                        best_matches = good_matches
+                        best_image_kp2 = best_match_descriptors
+                    
                 if self.best_index != -1:
                     print("Got the first match")
                 else:
@@ -245,19 +229,32 @@ class Loop(Node):
             elif self.best_index != -1:
                 next_index = self.best_index + 1
 
-                next_hist = self.get_bow_histogram(img_list[next_index])
-                query_hist_2 = self.get_bow_histogram(query_img)
+                next_hist, next_descriptors = self.get_histogram_descriptors(img_list[next_index], True)
+                query_hist, query_descriptors = self.get_histogram_descriptors(query_img, True)
 
-                next_score = round(cosine_similarity(query_hist_2.reshape(1, -1), next_hist.reshape(1, -1))[0][0],2)
-            
-                if next_score >= self.cosine_similarity_threshold:
-                    print(f"Second image matched, comparing moments", flush=True)
+                next_score = round(cosine_similarity(query_hist.reshape(1, -1), next_hist.reshape(1, -1))[0][0],2)
+                # matches = self.bf.match(query_descriptors, next_descriptors)
 
-                    # Both images are revisiting → trigger revisit logic
-                    is_similar, hu_distance = self.compare_moment(query_img, img_list[next_index],threshold=self.moment_comparison_threshold)
+                # # Sort matches by descriptor distance
+                # matches = sorted(matches, key=lambda x: x.distance)
+                # good_matches = [m for m in matches if m.distance <self.revisit_distance_threshold] # lower is better.
+        
+
+                # if len(good_matches) > self.revisit_match_threshold:                  
+                if next_score >= self.cosine_similarity_threshold:# - (len(self.list_of_local_maps) // 10) * 0.02:
+                    # print(f"Second image matched, comparing moments", flush=True)
+
+                    # # Both images are revisiting → trigger revisit logic
+                    # is_similar, hu_distance = self.compare_moment(query_img, img_list[next_index],threshold=round(self.moment_comparison_threshold*(len(self.list_of_local_maps)//2)))
                     
-                    if is_similar:
-                        print("REVVISSTTT", flush=True)
+                    print("REVVISSTTT", flush=True)
+                    
+                    self.revisit_count +=1
+                    #reset
+                    self.best_index = -1
+                    
+                    
+                    if self.revisit_count >=2:
                         loop_image = np.hstack((query_img, self.list_of_local_maps[next_index]))
                         self.revisit.publish(self.bridge.cv2_to_imgmsg(loop_image))
                         
@@ -266,11 +263,7 @@ class Loop(Node):
                         request.data = True
                         future = self.iceberg_revisit_client.call_async(request)
                         future.add_done_callback(self.get_state_callback)       
-                    else:
-                        print(f"FALSSEE, {hu_distance}", flush=True)
                     
-                    #reset
-                    self.best_index = -1
 
                 else:
                     print(f"Second image didnt match well, resetting", flush=True)
@@ -343,7 +336,7 @@ class Loop(Node):
             print(f"updated; {len(self.list_of_local_maps), len(self.list_of_iceberg_frame_time_in_odom), len(self.list_of_vx_in_odom)}", flush=True)
             self.iceberg_tf = True
 
-        if self.iceberg_frame_time_in_odom.sec - self.start_time.sec > 26: #s
+        if self.iceberg_frame_time_in_odom.sec - self.start_time.sec > self.msis_scan_time: #s
             #The loop that grabs costmap image every msis image
             self.start_time = self.iceberg_frame_time_in_odom
             large_image_copy = large_img
@@ -357,7 +350,7 @@ class Loop(Node):
             updated = True
 
             print(f"updated; {len(self.list_of_local_maps), len(self.list_of_iceberg_frame_time_in_odom), len(self.list_of_vx_in_odom)}", flush=True)
-            if len(self.list_of_local_maps) > 70:
+            if len(self.list_of_local_maps) > round(self.max_time_for_one_loop/self.msis_scan_time):
                 request = SetBool.Request()
                 request.data = False
                 future = self.iceberg_revisit_client.call_async(request)
@@ -366,7 +359,7 @@ class Loop(Node):
         return large_image_copy, updated
 
 
-    def get_bow_histogram(self, img):
+    def get_histogram_descriptors(self, img, return_histogram):
         """
         Extracts a BoW histogram from an image using AKAZE descriptors and a trained KMeans model.
 
@@ -379,21 +372,24 @@ class Loop(Node):
         # Extract AKAZE descriptors
         img = cv2.resize(img, (300,300), interpolation=cv2.INTER_CUBIC)
         keypoints, descriptors = self.akaze.detectAndCompute(img, None)
-        kmeans_model = KMeans(n_clusters=10).fit(descriptors)
-        if descriptors is None or len(descriptors) == 0:
-            # If no descriptors found, return zero histogram
-            return np.zeros(kmeans_model.n_clusters, dtype=float)
+        if return_histogram == True:
+            kmeans_model = KMeans(n_clusters=10).fit(descriptors)
+            if descriptors is None or len(descriptors) == 0:
+                # If no descriptors found, return zero histogram
+                return np.zeros(kmeans_model.n_clusters, dtype=float)
 
-        # Assign each descriptor to a visual word (cluster)
-        words = kmeans_model.predict(descriptors)
+            # Assign each descriptor to a visual word (cluster)
+            words = kmeans_model.predict(descriptors)
 
-        # Build histogram
-        hist, _ = np.histogram(words, bins=np.arange(kmeans_model.n_clusters + 1))
+            # Build histogram
+            hist, _ = np.histogram(words, bins=np.arange(kmeans_model.n_clusters + 1))
 
-        # Normalize histogram
-        hist = hist.astype(float) / np.sum(hist)
+            # Normalize histogram
+            hist = hist.astype(float) / np.sum(hist)
 
-        return hist
+            return hist, descriptors
+        else:
+            return None, descriptors
     
 def main():
     rclpy.init()
