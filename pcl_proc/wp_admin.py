@@ -90,10 +90,14 @@ class Wp_Admin(Node):
         self.create_subscription(Float32, path_topic + '/distance_to_obstacle', self.distance_cB, 1)
         self.create_subscription(Point, path_topic + "/best_point", self.point_cB, 1)
 
+        self.create_subscription(Int16, path_topic + "/surge", self.surge_cB, 1)
+
+
         # Declare services
         self.get_waypoint_service_client = self.create_client(GetWaypoints, self.get_waypoint_service_name)
         self.get_state_service_client = self.create_client(GetState, self.get_state_service_name)
         self.change_state_service_client = self.create_client(ChangeState, self.change_state_service_name)
+        self.depth_planner_service_client = self.create_client(SetBool, '/alpha_rise/iceberg/plan_depth')
         
         self.create_service(SetBool, '/alpha_rise/iceberg/revisit', self.revisit_service_cb)
         self.create_service(SetString, '/alpha_rise/mission', self.mission_service_cb)
@@ -117,6 +121,8 @@ class Wp_Admin(Node):
         #Number of loops
         self.loop = 0
 
+        self.plan_depth = False
+
         self.bool_search_mode = False
 
         self.bool_exit_mode = False
@@ -135,11 +141,20 @@ class Wp_Admin(Node):
             response.success = True
             response.message = f"VALID CMD RECIEVED, EXECUTING MISSION"
             self.bool_exit_mode = False
+
+            if self.mission_command == "CONTINUE":
+                request = SetBool.Request()
+                request.data = True
+                future = self.depth_planner_service_client.call_async(request)
+                future.add_done_callback(self.depth_planner_callback)   
         else:
             response.success = False
             response.message = f"INVALID CMD"
         return response
     
+    def depth_planner_callback(self,future):
+        response = future.result()
+
     def revisit_service_cb(self, request, response):
         """
         On this service call, either by loop detection or timeout, 
@@ -157,7 +172,13 @@ class Wp_Admin(Node):
         print(response.message, flush=True)
         self.exit_mode(wpts,info= response.message)
         return response
-            
+    
+    def surge_cB(self, msg):
+        if msg.data == 1:
+            self.plan_depth = True
+        else:
+            self.plan_depth = False
+
     def point_cB(self, msg):
         """
         Best point callback.
@@ -262,7 +283,11 @@ class Wp_Admin(Node):
                         
                         wpt = Waypoint()
                         wpt.header = msg.header
-                        wpt.u = self.follow_mode_surge
+                        
+                        if self.plan_depth:
+                            wpt.u = 0.1
+                        else:
+                            wpt.u = self.follow_mode_surge
 
                         best_point = Point()
                         best_point.x = self.x
