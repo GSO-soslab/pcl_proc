@@ -900,13 +900,12 @@ class PathGen(Node):
         valid_point, valid_distance, valid_angle, valid_track = [],[],[], []
         for index, point in enumerate((line_frame_points)):
             #Get distance to all points from vx{L}
-            vehicle_to_point_distance = math.sqrt((point[0] - self.vx_line_frame[0])**2 + (point[1] - self.vx_line_frame[1])**2)
-
+            vehicle_to_point_distance = np.linalg.norm(np.array(point) - np.array(self.vx_line_frame))
             #Get angle to all points from vx in{L}
             delta_x = point[0] - self.vx_line_frame[0]
             delta_y = point[1] - self.vx_line_frame[1]
 
-            vehicle_to_point_angle = math.atan2(delta_y, delta_x)
+            vehicle_to_point_angle = math.atan2(delta_y.item(), delta_x.item())
             #If vx Y in {L} is +ve, add -180 
             # [[x],[y]]
             if self.vx_line_frame[1][0] > 0.0:
