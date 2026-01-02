@@ -436,7 +436,7 @@ class PathGen(Node):
             vx_frame_pixels = path_utils.find_cordinates_of_max_value(vx_frame_cropped)
 
             #Atleast need 2 points
-            if len(vx_frame_pixels) > 2:
+            if vx_frame_pixels != None and len(vx_frame_pixels) > 2:
                 #New origin from list of points.
                 x_coordinates, y_coordinates = zip(*vx_frame_pixels)
                 
@@ -853,35 +853,38 @@ class PathGen(Node):
             min_y = float('inf')
             shortest_point = None
             raw_pixels = path_utils.find_cordinates_of_max_value(vx_image)
-            shifted_coordinates = [(x - self.height//2, self.width//2 - y) for x, y in raw_pixels]
-            """
-            ------>x COSTMAP IMAGE
-            |
-            |   ----->x'
-            |   |
-            |   |
-            |   Vy'
-            yV
-            """
-            shifted_coordinates = [(-y,-x) for x, y in shifted_coordinates]
-            """
-            ------>x COSTMAP IMAGE
-            |
-            |      ^x
-            |      |
-            |      |
-            |  y<--- VEHICLE FRAME
-            |   
-            yV
-            """
-            image_polar = [(np.sqrt(x**2 + y**2), np.degrees(np.arctan2(y, x))) for x,y in shifted_coordinates]
-            for r,theta in image_polar:
-                if r < min_y:
-                    min_y = r
-                    shortest_point = [r,theta]
-            if shortest_point != None:
-                shortest_point_cartesian = shortest_point[0]  * self.resolution
-                return shortest_point_cartesian
+            if raw_pixels != None:
+                shifted_coordinates = [(x - self.height//2, self.width//2 - y) for x, y in raw_pixels]
+                """
+                ------>x COSTMAP IMAGE
+                |
+                |   ----->x'
+                |   |
+                |   |
+                |   Vy'
+                yV
+                """
+                shifted_coordinates = [(-y,-x) for x, y in shifted_coordinates]
+                """
+                ------>x COSTMAP IMAGE
+                |
+                |      ^x
+                |      |
+                |      |
+                |  y<--- VEHICLE FRAME
+                |   
+                yV
+                """
+                image_polar = [(np.sqrt(x**2 + y**2), np.degrees(np.arctan2(y, x))) for x,y in shifted_coordinates]
+                for r,theta in image_polar:
+                    if r < min_y:
+                        min_y = r
+                        shortest_point = [r,theta]
+                if shortest_point != None:
+                    shortest_point_cartesian = shortest_point[0]  * self.resolution
+                    return shortest_point_cartesian
+            else:
+                return -1
         else:
             return -1
 
@@ -897,13 +900,12 @@ class PathGen(Node):
         valid_point, valid_distance, valid_angle, valid_track = [],[],[], []
         for index, point in enumerate((line_frame_points)):
             #Get distance to all points from vx{L}
-            vehicle_to_point_distance = math.sqrt((point[0] - self.vx_line_frame[0])**2 + (point[1] - self.vx_line_frame[1])**2)
-
+            vehicle_to_point_distance = np.linalg.norm(np.array(point) - np.array(self.vx_line_frame))
             #Get angle to all points from vx in{L}
             delta_x = point[0] - self.vx_line_frame[0]
             delta_y = point[1] - self.vx_line_frame[1]
 
-            vehicle_to_point_angle = math.atan2(delta_y, delta_x)
+            vehicle_to_point_angle = math.atan2(delta_y.item(), delta_x.item())
             #If vx Y in {L} is +ve, add -180 
             # [[x],[y]]
             if self.vx_line_frame[1][0] > 0.0:

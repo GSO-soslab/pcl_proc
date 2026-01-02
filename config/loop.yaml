@@ -1,7 +1,5 @@
 /alpha_rise/loop_checker:
   ros__parameters:
-    moment_comparison_threshold: 0.5
-    revisit_distance_threshold: 50
-    revisit_match_threshold: 3
-    msis_scan_time: 26.0
-    enable_loop_detect: True
+    max_time_for_one_loop: 1500 #s
+    cosine_similarity_threshold: 0.9 #higher is more similiar
+    msis_scan_time: 26.0 #time taken for a new scan image
