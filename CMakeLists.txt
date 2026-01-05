@@ -8,6 +8,8 @@ find_package(std_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(image_transport REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(ping360_msgs REQUIRED)
 find_package(mvp_msgs REQUIRED)
 find_package(OpenCV REQUIRED)
@@ -24,6 +26,9 @@ install(
 # Add executable target
 add_executable(msis_pcl src/msis_pcl.cpp)
 
+add_executable(msis_voxels src/msis_voxels.cpp)
+
+
 # Link dependencies to the target
 ament_target_dependencies(msis_pcl
   rclcpp
@@ -35,11 +40,24 @@ ament_target_dependencies(msis_pcl
   ping360_msgs
 )
 
+ament_target_dependencies(msis_voxels
+  rclcpp
+  std_msgs
+  visualization_msgs
+  sensor_msgs
+  ping360_msgs
+  geometry_msgs
+)
+
 # Link OpenCV separately
 target_link_libraries(msis_pcl ${OpenCV_LIBRARIES})
 
 # Install the target
 install(TARGETS msis_pcl
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(TARGETS msis_voxels
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -57,6 +75,10 @@ install(PROGRAMS
 
 install(PROGRAMS
   pcl_proc/loop.py
+  DESTINATION lib/${PROJECT_NAME})
+
+install(PROGRAMS
+  pcl_proc/msis_prob_clouds.py
   DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY pcl_proc/
