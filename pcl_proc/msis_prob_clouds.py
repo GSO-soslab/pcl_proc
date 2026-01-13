@@ -62,6 +62,9 @@ class MSIS_Prob_Clouds(Node):
 
             pointclouds = pointclouds[dist2 > dist2_thresh]
 
+            # Map to probabilities
+            pointclouds = self.convert_to_probabilities(pointclouds)
+
             # Populate SONAR fan
             pointclouds = self.populate_sonar_fan(pointclouds, self.cos_az, self.sin_az, self.cos_el, self.sin_el, self.az_grid)
 
@@ -69,12 +72,15 @@ class MSIS_Prob_Clouds(Node):
             if not self.correspondence:
                 _, self.correspondence_index = self.create_voxel_corresponding_points(self.voxel_centroids, pointclouds[:,:3])
                 self.correspondence = True
-                
+
             pointclouds = pointclouds[self.correspondence_index, :]
 
             pointclouds = self.numpy_to_pointcloud2(pointclouds, msg)
 
             self.pub.publish(pointclouds)
+
+    def convert_to_probabilities(self, pointclouds):
+        return pointclouds
 
     def create_voxel_corresponding_points(self, voxel_points:np.ndarray, geometry_points:np.ndarray):
         '''

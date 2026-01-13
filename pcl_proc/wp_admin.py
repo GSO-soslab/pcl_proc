@@ -125,6 +125,10 @@ class Wp_Admin(Node):
 
         self.bool_search_mode = False
 
+        self.valid_point = True
+
+        self.valid_best_point = True
+
         self.bool_exit_mode = False
 
         self.mission_command = "EMPTY"
@@ -183,7 +187,14 @@ class Wp_Admin(Node):
         """
         Best point callback.
         """
-        self.x, self.y, z = msg.x, msg.y, msg.z
+        vx = round(self.base_to_odom_tf.transform.translation.x)
+        vy = round(self.base_to_odom_tf.transform.translation.y)
+
+        if math.hypot(round(vx-msg.x), round(vy-msg.y)) > 5.0:
+            self.x, self.y, z = msg.x, msg.y, msg.z
+            self.valid_best_point = True
+        else:
+            self.valid_best_point =False
 
     def distance_cB(self, msg):
         """
@@ -259,16 +270,41 @@ class Wp_Admin(Node):
         # Path is always being published.
         # If same path, then no new path is then published.
         if len(msg.poses) == self.n_points:
-            
-            #Check number of points in front of the vehicle
-            n_points_above_vx = 0
-            for pose in msg.poses:
-                path_vx_frame = tf2_geometry_msgs.do_transform_pose_stamped(pose, self.odom_to_base_tf)
-                if path_vx_frame.pose.position.x > 0:
-                    n_points_above_vx += 1 
 
+            # Get terminal poses
+            start_pose = msg.poses[0]
+            end_pose   = msg.poses[-1]
+
+            # Distances to best_point position
+            dx_start = start_pose.pose.position.x - self.x
+            dy_start = start_pose.pose.position.y - self.y
+            dist_start = math.hypot(dx_start, dy_start)
+
+            dx_end = end_pose.pose.position.x - self.x
+            dy_end = end_pose.pose.position.y - self.y
+            dist_end = math.hypot(dx_end, dy_end)
+
+            # Select closest terminal point
+            if dist_start <= dist_end:
+                self.closest_terminal_pose = start_pose
+            else:
+                self.closest_terminal_pose = end_pose
+            
+            vx = round(self.base_to_odom_tf.transform.translation.x)
+            vy = round(self.base_to_odom_tf.transform.translation.y)
+            if math.hypot(round(vx-self.closest_terminal_pose.pose.position.x), round(vy-self.closest_terminal_pose.pose.position.y)) > 10.0:
+                valid_closest_point = True
+            else:
+                valid_closest_point = False
+                
+            if valid_closest_point and self.valid_best_point:
+                self.valid_point = True
+            else:
+                self.valid_point = False
+                
             if self.state == "survey":
-                if msg.poses != self.poses:
+                if self.valid_point:
+
                     self.search_mode_timer = time.time()
                     #grab time of follow_mode initializing
                     if self.follow_flag == 0:
@@ -296,18 +332,29 @@ class Wp_Admin(Node):
                         wpt.wpt = best_point
                         wpts.wpt.append(wpt)
                         # wp.polygon.points.append(best_point)
+
+                        wpt = Waypoint()
+                        wpt.header = msg.header
+                        wpt.u = self.follow_mode_surge
+                        best_point = Point()    
+                        best_point.x = self.closest_terminal_pose.pose.position.x
+                        best_point.y = self.closest_terminal_pose.pose.position.y
+                        best_point.z = self.depth
+                        wpt.wpt = best_point
+                        wpts.wpt.append(wpt)
                         self.pub_update.publish(wpts)
-                        self.poses = msg.poses
-                    
+
+                        # self.poses = msg.poses            
                     #Chart a course away from the iceberg when timer runs out.
                     #Go to a point 90 degree port side of Vx
                     else:
                         self.get_logger().info(f"Exit sequence. Timer ran out at {self.follow_mode_timer_param}s")
                         self.exit_mode(wpts, info = f"Mission completed. Timeout of {self.follow_mode_timer_param}s.")
-
+                    # else:
+                    #     self.iceberg_reacquisition_mode(wpts)
             #Iceberg Reacquisition Mode is when 
             #the vehicle reaches end of a valid path.
-            elif n_points_above_vx <= 3 or self.state == "start":     
+            elif self.state == "start":     
                 self.iceberg_reacquisition_mode(wpts)
         
         #Path is still published when no costmap. But the n_points is 1 (vx_x, vx_y)
@@ -482,6 +529,32 @@ class Wp_Admin(Node):
         self.get_logger().info("Iceberg Reacquisition Mode", throttle_duration_sec = 3)
         self.pub_update.publish(wpts)
 
+
+    def reaquisition_points(self):
+        x0 = self.closest_terminal_pose.pose.position.x
+        y0 = self.closest_terminal_pose.pose.position.y
+
+        # Circle radius
+        r = self.standoff_distance_in_meters  # meters, adjust as needed
+
+        # Center for clockwise arc (example: center below starting point)
+        xc = x0
+        yc = y0 - r
+
+        # Generate points along arc (45 degrees)
+        num_points = 10
+        theta_start = math.pi/2   # start angle relative to center
+        theta_end   = math.pi/2 - math.pi/4  # clockwise 45 degrees
+        arc_points = []
+
+        for i in range(num_points + 1):
+            theta = theta_start + (theta_end - theta_start) * i / num_points
+            x = xc + r * math.cos(theta)
+            y = yc + r * math.sin(theta)
+            arc_points.append((x, y))
+
+        return arc_points
+    
     def check_state(self):
         """
         Function to check the state of the helm

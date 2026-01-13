@@ -63,21 +63,9 @@ install(TARGETS msis_voxels
 
 install(PROGRAMS
   pcl_proc/filter.py
-  DESTINATION lib/${PROJECT_NAME})
-
-install(PROGRAMS
   pcl_proc/path_gen.py
-  DESTINATION lib/${PROJECT_NAME})
-
-install(PROGRAMS
   pcl_proc/wp_admin.py
-  DESTINATION lib/${PROJECT_NAME})
-
-install(PROGRAMS
   pcl_proc/loop.py
-  DESTINATION lib/${PROJECT_NAME})
-
-install(PROGRAMS
   pcl_proc/msis_prob_clouds.py
   DESTINATION lib/${PROJECT_NAME})
 
