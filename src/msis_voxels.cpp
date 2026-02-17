@@ -19,7 +19,7 @@ public:
         this->declare_parameter("range_max", 50.0);
         this->declare_parameter("horizontal_fov_deg", 2.0);
         this->declare_parameter("vertical_fov_deg", 25.0);
-        this->declare_parameter("resolution", 0.5);
+        this->declare_parameter("resolution", 1.0);
         this->declare_parameter("frame_id", "alpha_rise/ping360_link");
 
         this->get_parameter("range_max", max_range_);
