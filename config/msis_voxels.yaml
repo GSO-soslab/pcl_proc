@@ -1,0 +1,14 @@
+/alpha_rise/msis_voxel_node:
+  ros__parameters:
+    range_max: 50.0
+    horizontal_fov_deg: 2.0
+    vertical_fov_deg: 25.0
+    resolution: 1.0
+    frame_id: "alpha_rise/ping360_link"
+
+/alpha_rise/MSIS_Prob_Clouds:
+  ros__parameters:
+    vertical_fov_deg: 25.0
+    resolution: 1.0
+    min_range: 5.0
+    z_max: -1.0

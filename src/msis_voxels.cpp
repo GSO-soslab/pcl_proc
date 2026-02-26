@@ -95,33 +95,23 @@ private:
             if (x > max_range_)
                 continue;
 
-            double y_limit = x * tan(h_fov_ / 2.0);
             double z_limit = x * tan(v_fov_ / 2.0);
-
-            int y_steps = static_cast<int>(std::ceil((2.0 * y_limit) / resolution_));
             int z_steps = static_cast<int>(std::ceil((2.0 * z_limit) / resolution_));
 
-            for (int iy = -y_steps / 2; iy <= y_steps / 2; iy++)
+            for (int iz = -z_steps / 2; iz <= z_steps / 2; iz++)
             {
-                double y = iy * resolution_;
-                if (std::abs(y) > y_limit + 0.5 * resolution_)
+                double z = iz * resolution_;
+                if (std::abs(z) > z_limit + 0.5 * resolution_)
                     continue;
 
-                for (int iz = -z_steps / 2; iz <= z_steps / 2; iz++)
-                {
-                    double z = iz * resolution_;
-                    if (std::abs(z) > z_limit + 0.5 * resolution_)
-                        continue;
+                double x_r, y_r, z_r;
+                rotate_yaw(x, 0.0, z, yaw, x_r, y_r, z_r);
 
-                    double x_r, y_r, z_r;
-                    rotate_yaw(x, y, z, yaw, x_r, y_r, z_r);
-
-                    geometry_msgs::msg::Point p;
-                    p.x = x_r;
-                    p.y = y_r;
-                    p.z = z_r;
-                    marker.points.push_back(p);
-                }
+                geometry_msgs::msg::Point p;
+                p.x = x_r;
+                p.y = y_r;
+                p.z = z_r;
+                marker.points.push_back(p);
             }
         }
 
