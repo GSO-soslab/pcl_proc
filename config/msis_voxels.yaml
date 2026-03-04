@@ -6,7 +6,7 @@
     resolution: 1.0
     frame_id: "alpha_rise/ping360_link"
 
-/alpha_rise/MSIS_Prob_Clouds:
+/alpha_rise/msis_prob_clouds:
   ros__parameters:
     vertical_fov_deg: 25.0
     resolution: 1.0

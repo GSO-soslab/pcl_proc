@@ -36,6 +36,7 @@ class PathGen(Node):
         self.declare_parameter('debug', Parameter.Type.BOOL)
         self.declare_parameter('enable_search_mode', Parameter.Type.BOOL)
         self.declare_parameter('costmap_topic', Parameter.Type.STRING)
+        self.declare_parameter('costmap_method', Parameter.Type.STRING)
         self.declare_parameter('path_topic', Parameter.Type.STRING)
         self.declare_parameter('canny_min_threshold', Parameter.Type.INTEGER)
         self.declare_parameter('canny_max_threshold', Parameter.Type.INTEGER)
@@ -54,6 +55,7 @@ class PathGen(Node):
         self.debug = self.get_parameter('debug').get_parameter_value().bool_value
         enable_search_mode = self.get_parameter('enable_search_mode').get_parameter_value().bool_value
         costmap_topic = self.get_parameter('costmap_topic').get_parameter_value().string_value
+        costmap_method = self.get_parameter('costmap_method').get_parameter_value().string_value
         path_topic = self.get_parameter('path_topic').get_parameter_value().string_value
         self.canny_min = self.get_parameter('canny_min_threshold').get_parameter_value().integer_value
         self.canny_max = self.get_parameter('canny_max_threshold').get_parameter_value().integer_value
@@ -95,10 +97,11 @@ class PathGen(Node):
         self.path = None
         
         #LifeCycle Node Transitions
-        target_node = '/alpha_rise/costmap'
-        self.client = self.create_client(ChangeState, f'{target_node}/change_state')
-        
-        self.transition()
+        if costmap_method == "nav2":
+            target_node = '/alpha_rise/costmap'
+            self.client = self.create_client(ChangeState, f'{target_node}/change_state')
+            
+            self.transition()
     
     def transition(self):
         req = ChangeState.Request()

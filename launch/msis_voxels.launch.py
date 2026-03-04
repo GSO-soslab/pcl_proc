@@ -26,7 +26,7 @@ def generate_launch_description():
     msis_prob_clouds_node = Node(
         package='pcl_proc',
         executable='msis_prob_clouds.py',
-        name='MSIS_Prob_Clouds',
+        name='msis_prob_clouds',
         namespace='alpha_rise',
         output='screen',
         parameters=[param_config]
