@@ -9,6 +9,7 @@
 /alpha_rise/msis_prob_clouds:
   ros__parameters:
     vertical_fov_deg: 25.0
+    intensity_threshold: 20.0
     resolution: 1.0
     min_range: 5.0
     z_max: -1.0

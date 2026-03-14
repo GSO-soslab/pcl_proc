@@ -13,10 +13,10 @@ from tf2_ros import TransformException
 import tf2_sensor_msgs.tf2_sensor_msgs
 import sensor_msgs_py.point_cloud2 as pc2
 
-class MSIS_Prob_Clouds(Node):
+class MsisProbClouds(Node):
 
     def __init__(self):
-        super().__init__('MSIS_Prob_Clouds')
+        super().__init__('msis_prob_clouds')
 
         self.marker_sub = self.create_subscription(Marker,'/alpha_rise/msis/geometry',self.marker_cb,10)
         self.cloud_sub = self.create_subscription(PointCloud2,'/alpha_rise/msis/pointcloud', self.cloud_cb,10)
@@ -28,11 +28,13 @@ class MSIS_Prob_Clouds(Node):
         self.declare_parameter('vertical_fov_deg', Parameter.Type.DOUBLE)
         self.declare_parameter('resolution', Parameter.Type.DOUBLE)
         self.declare_parameter('min_range', Parameter.Type.DOUBLE)
+        self.declare_parameter('intensity_threshold', Parameter.Type.DOUBLE)
         self.declare_parameter('z_max', Parameter.Type.DOUBLE)
 
         v_fov_deg = self.get_parameter('vertical_fov_deg').value
         resolution = self.get_parameter('resolution').value
         self.min_range_ = self.get_parameter('min_range').value
+        self.intensity_threshold = self.get_parameter('intensity_threshold').value
         self.z_max_ = self.get_parameter('z_max').value
 
         # Create elevation angle arrays
@@ -199,8 +201,8 @@ class MSIS_Prob_Clouds(Node):
         return cloud_msg
 
     def convert_to_probabilities(self, pointclouds):
-        """Convert intensity to occupancy probability: <30→0.2, ≥30→0.9."""
-        prob = np.where(pointclouds[:, 3] >= 30.0, 0.9, 0.2)
+        """Convert intensity to occupancy probability: <20→0.2, ≥20→0.9."""
+        prob = np.where(pointclouds[:, 3] >= self.intensity_threshold, 0.9, 0.2)
         pointclouds[:, 3] = prob
         return pointclouds
 
@@ -232,7 +234,7 @@ class MSIS_Prob_Clouds(Node):
 
 def main():
     rclpy.init()
-    node = MSIS_Prob_Clouds()
+    node = MsisProbClouds()
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()

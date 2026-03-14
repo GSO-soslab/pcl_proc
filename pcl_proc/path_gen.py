@@ -55,7 +55,7 @@ class PathGen(Node):
         self.debug = self.get_parameter('debug').get_parameter_value().bool_value
         enable_search_mode = self.get_parameter('enable_search_mode').get_parameter_value().bool_value
         costmap_topic = self.get_parameter('costmap_topic').get_parameter_value().string_value
-        costmap_method = self.get_parameter('costmap_method').get_parameter_value().string_value
+        self.costmap_method = self.get_parameter('costmap_method').get_parameter_value().string_value
         path_topic = self.get_parameter('path_topic').get_parameter_value().string_value
         self.canny_min = self.get_parameter('canny_min_threshold').get_parameter_value().integer_value
         self.canny_max = self.get_parameter('canny_max_threshold').get_parameter_value().integer_value
@@ -81,7 +81,7 @@ class PathGen(Node):
         self.best_point_pub = self.create_publisher(Point, f"{path_topic}/best_point", 10)
         self.obstacle_distance_pub = self.create_publisher(Float32, f"{path_topic}/distance_to_obstacle", 10)
         self.image_process_pipeline_pub = self.create_publisher(Image, f"{path_topic}/image", 10)
-        self.costmap_image_pub = self.create_publisher(Image, f"costmap/local/image", 10)
+        self.costmap_image_pub = self.create_publisher(Image, "costmap/local/image", 10)
 
         self.bridge = CvBridge()
         
@@ -97,7 +97,7 @@ class PathGen(Node):
         self.path = None
         
         #LifeCycle Node Transitions
-        if costmap_method == "nav2":
+        if self.costmap_method == "nav2":
             target_node = '/alpha_rise/costmap'
             self.client = self.create_client(ChangeState, f'{target_node}/change_state')
             
@@ -166,19 +166,15 @@ class PathGen(Node):
         data = cv2.flip(data, 1)  
         data = cv2.rotate(data, cv2.ROTATE_90_CLOCKWISE)
 
-        #Erode away speckle noise.
-        erode = cv2.erode(data, (5,5),2)
-        erode = cv2.erode(erode, (5,5),2)
-        # erode = cv2.erode(erode, (5,5),2)
+        # Custom OGM has inverted polarity vs nav2 (occupied=black, free=white)
+        if self.costmap_method != "nav2":
+            data = cv2.bitwise_not(data)
 
-        # Dilate Raw Measurements to get solid reading       
-        dilate = cv2.dilate(erode, (5,5), 2)
-        dilate = cv2.dilate(dilate, (5,5), 2)
-        dilate = cv2.dilate(dilate, (5,5), 2)
-        dilate = cv2.dilate(dilate, (5,5), 2)
-        dilate = cv2.dilate(dilate, (5,5), 2)
+        kernel = np.ones((3,3), np.uint8)
+        # Opening (erode then dilate) removes speckle noise while preserving obstacle shape
+        dilate = cv2.morphologyEx(data, cv2.MORPH_OPEN, kernel, iterations=1)
 
-        costmap_image_ros = self.bridge.cv2_to_imgmsg(data)
+        costmap_image_ros = self.bridge.cv2_to_imgmsg(dilate)
         costmap_image_ros.header.stamp = self.time
         costmap_image_ros.header.frame_id = self.odom_frame
         self.costmap_image_pub.publish(costmap_image_ros)
