@@ -15,5 +15,5 @@
     min_range: 5.0
     z_max: -1.0
     cloud_sub_topic: /alpha_rise/msis/pointcloud
-    fan_pub_topic: /alpha_rise/msis/pointcloud/fan
+    fan_pub_topic: /alpha_rise/msis/pointcloud/probability
     range_filter_pub_topic: /alpha_rise/msis/intensity_range/range_filter

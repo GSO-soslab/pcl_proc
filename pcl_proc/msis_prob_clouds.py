@@ -238,6 +238,7 @@ class MsisProbClouds(Node):
         fan_points[:, 0] = (rc * x_dir).reshape(-1)
         fan_points[:, 1] = (rc * y_dir).reshape(-1)
         fan_points[:, 2] = (r * sin_el).reshape(-1)
+        #Joint probability
         fan_points[:, 3] = (intensity[:, None] * self.el_prob[None, :]).reshape(-1)
 
         return fan_points
