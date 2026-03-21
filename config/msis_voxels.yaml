@@ -1,15 +1,19 @@
-/alpha_rise/msis_voxel_node:
+/**:
   ros__parameters:
+    # shared
+    vertical_fov_deg: 25.0
+    resolution: 1.0
+    marker_topic: /alpha_rise/msis/geometry
+    
+    # msis_voxel_node
     range_max: 50.0
     horizontal_fov_deg: 2.0
-    vertical_fov_deg: 25.0
-    resolution: 1.0
     frame_id: "alpha_rise/ping360_link"
-
-/alpha_rise/msis_prob_clouds:
-  ros__parameters:
-    vertical_fov_deg: 25.0
+    
+    # msis_prob_clouds
     intensity_threshold: 20.0
-    resolution: 1.0
     min_range: 5.0
     z_max: -1.0
+    cloud_sub_topic: /alpha_rise/msis/pointcloud
+    fan_pub_topic: /alpha_rise/msis/pointcloud/fan
+    range_filter_pub_topic: /alpha_rise/msis/intensity_range/range_filter

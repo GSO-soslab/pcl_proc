@@ -21,6 +21,7 @@ public:
         this->declare_parameter("vertical_fov_deg", 25.0);
         this->declare_parameter("resolution", 1.0);
         this->declare_parameter("frame_id", "alpha_rise/ping360_link");
+        this->declare_parameter<std::string>("marker_topic");
 
         this->get_parameter("range_max", max_range_);
         double h_fov_deg, v_fov_deg;
@@ -28,11 +29,13 @@ public:
         this->get_parameter("vertical_fov_deg", v_fov_deg);
         this->get_parameter("resolution", resolution_);
         this->get_parameter("frame_id", frame_id_);
+        std::string marker_topic;
+        this->get_parameter("marker_topic", marker_topic);
 
         h_fov_ = h_fov_deg * M_PI / 180.0;
         v_fov_ = v_fov_deg * M_PI / 180.0;
 
-        marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("msis/geometry", 10);
+        marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>(marker_topic, 10);
 
         subscription_ = this->create_subscription<ping360_msgs::msg::SonarEcho>(
             "/alpha_rise/msis/echo", 10, std::bind(&MSISVoxels::echo_callback, this, _1));

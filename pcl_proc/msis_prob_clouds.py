@@ -18,18 +18,28 @@ class MsisProbClouds(Node):
     def __init__(self):
         super().__init__('msis_prob_clouds')
 
-        self.marker_sub = self.create_subscription(Marker,'/alpha_rise/msis/geometry',self.marker_cb,10)
-        self.cloud_sub = self.create_subscription(PointCloud2,'/alpha_rise/msis/pointcloud', self.cloud_cb,10)
-        self.pub = self.create_publisher(PointCloud2, '/alpha_rise/msis/pointcloud/fan', 10)
-        self.pub_range_filter_profile = self.create_publisher(Float32MultiArray, '/alpha_rise/msis/intensity_range/range_filter', 10)
         self.receive_voxel_msg = False
 
         # Parameters
+        self.declare_parameter('marker_topic', Parameter.Type.STRING)
+        self.declare_parameter('cloud_sub_topic', Parameter.Type.STRING)
+        self.declare_parameter('fan_pub_topic', Parameter.Type.STRING)
+        self.declare_parameter('range_filter_pub_topic', Parameter.Type.STRING)
         self.declare_parameter('vertical_fov_deg', Parameter.Type.DOUBLE)
         self.declare_parameter('resolution', Parameter.Type.DOUBLE)
         self.declare_parameter('min_range', Parameter.Type.DOUBLE)
         self.declare_parameter('intensity_threshold', Parameter.Type.DOUBLE)
         self.declare_parameter('z_max', Parameter.Type.DOUBLE)
+
+        marker_topic = self.get_parameter('marker_topic').value
+        cloud_sub_topic = self.get_parameter('cloud_sub_topic').value
+        fan_pub_topic = self.get_parameter('fan_pub_topic').value
+        range_filter_pub_topic = self.get_parameter('range_filter_pub_topic').value
+
+        self.marker_sub = self.create_subscription(Marker, marker_topic, self.marker_cb, 10)
+        self.cloud_sub = self.create_subscription(PointCloud2, cloud_sub_topic, self.cloud_cb, 10)
+        self.pub = self.create_publisher(PointCloud2, fan_pub_topic, 10)
+        self.pub_range_filter_profile = self.create_publisher(Float32MultiArray, range_filter_pub_topic, 10)
 
         v_fov_deg = self.get_parameter('vertical_fov_deg').value
         resolution = self.get_parameter('resolution').value
