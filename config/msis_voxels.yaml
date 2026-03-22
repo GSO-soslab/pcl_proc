@@ -11,6 +11,8 @@
     frame_id: "alpha_rise/ping360_link"
     
     # msis_prob_clouds
+    world_frame_id: "alpha_rise/world"
+    sensor_frame_id: "alpha_rise/ping360_link"
     intensity_threshold: 20.0
     min_range: 5.0
     z_max: -1.0

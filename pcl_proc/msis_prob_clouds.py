@@ -30,6 +30,8 @@ class MsisProbClouds(Node):
         self.declare_parameter('min_range', Parameter.Type.DOUBLE)
         self.declare_parameter('intensity_threshold', Parameter.Type.DOUBLE)
         self.declare_parameter('z_max', Parameter.Type.DOUBLE)
+        self.declare_parameter('world_frame_id', Parameter.Type.STRING)
+        self.declare_parameter('sensor_frame_id', Parameter.Type.STRING)
 
         marker_topic = self.get_parameter('marker_topic').value
         cloud_sub_topic = self.get_parameter('cloud_sub_topic').value
@@ -43,17 +45,18 @@ class MsisProbClouds(Node):
 
         v_fov_deg = self.get_parameter('vertical_fov_deg').value
         resolution = self.get_parameter('resolution').value
-        self.min_range_ = self.get_parameter('min_range').value
+        self.min_range = self.get_parameter('min_range').value
         self.intensity_threshold = self.get_parameter('intensity_threshold').value
-        self.z_max_ = self.get_parameter('z_max').value
+        self.z_max = self.get_parameter('z_max').value
+        self.world_frame_id = self.get_parameter('world_frame_id').value
+        self.sensor_frame_id = self.get_parameter('sensor_frame_id').value
 
         # Create elevation angle arrays
-        el_angles = np.deg2rad(np.arange(-v_fov_deg / 2, v_fov_deg / 2 + resolution, resolution))
+        el_angles_deg = np.arange(-v_fov_deg / 2, v_fov_deg / 2 + resolution, resolution)
+        el_angles = np.deg2rad(el_angles_deg)
         self.cos_el = np.cos(el_angles)[None, :]  # (1, E)
         self.sin_el = np.sin(el_angles)[None, :]  # (1, E)
-
-        el_angles_deg = np.arange(-v_fov_deg / 2, v_fov_deg / 2 + resolution, resolution)
-        #1.0 to 0.6
+        # 1.0 to 0.6
         self.el_prob = (1.0 - 0.4 * np.abs(el_angles_deg) / (v_fov_deg / 2)).astype(np.float32)  # (E,)
 
         # Static voxel KDTree built once in marker_cb
@@ -87,8 +90,7 @@ class MsisProbClouds(Node):
             return
 
         pointclouds = self.parse_buffer(msg)
-        N = len(pointclouds)
-        pointclouds, _ = self.range_filter(pointclouds, N, min_range=self.min_range_)
+        pointclouds, _ = self.range_filter(pointclouds)
         pointclouds = self.voxel_max(pointclouds)
         pointclouds = self.convert_to_probabilities(pointclouds)
         fan_points  = self.populate_sonar_fan(pointclouds, self.cos_el, self.sin_el)
@@ -111,11 +113,11 @@ class MsisProbClouds(Node):
         pts = np.frombuffer(msg.data, dtype=self._parse_dtype)
         return np.column_stack([pts['x'], pts['y'], pts['z'], pts['intensity']])
 
-    def range_filter(self, pointclouds, N, min_range=5.0):
-        """Range filter + publish aligned N-length intensity profile. Returns (filtered, mask)."""
+    def range_filter(self, pointclouds):
+        """Range filter + publish aligned intensity profile. Returns (filtered, mask)."""
         mask = (np.isfinite(pointclouds).all(axis=1) &
-                ((pointclouds[:, 0]**2 + pointclouds[:, 1]**2 + pointclouds[:, 2]**2) > min_range**2))
-        profile = np.zeros(N, dtype=np.float32)
+                ((pointclouds[:, 0]**2 + pointclouds[:, 1]**2 + pointclouds[:, 2]**2) > self.min_range**2))
+        profile = np.zeros(len(pointclouds), dtype=np.float32)
         profile[mask] = pointclouds[mask, 3]
         msg = Float32MultiArray()
         msg.data = profile.tolist()
@@ -124,11 +126,10 @@ class MsisProbClouds(Node):
 
     def depth_filter(self, pointcloud_msg):
         """Transform to world frame, filter points above z_max, transform back to sensor frame."""
-        sensor_frame = pointcloud_msg.header.frame_id
         try:
             transform = self.tf_buffer.lookup_transform(
-                'alpha_rise/world',
-                sensor_frame,
+                self.world_frame_id,
+                self.sensor_frame_id,
                 rclpy.time.Time()
             )
 
@@ -147,13 +148,15 @@ class MsisProbClouds(Node):
                 points_struct['intensity']
             )).astype(np.float32)
 
-            points = points[points[:, 2] <= self.z_max_]
-            pointcloud_msg = pc2.create_cloud(pointcloud_msg.header, self._fields, [tuple(p) for p in points])
+            points = points[points[:, 2] <= self.z_max]
+            pointcloud_msg.data = points.tobytes()
+            pointcloud_msg.width = len(points)
+            pointcloud_msg.row_step = pointcloud_msg.point_step * len(points)
 
             try:
                 transform = self.tf_buffer.lookup_transform(
-                    sensor_frame,
-                    'alpha_rise/world',
+                    self.sensor_frame_id,
+                    self.world_frame_id,
                     rclpy.time.Time()
                 )
                 return tf2_sensor_msgs.tf2_sensor_msgs.do_transform_cloud(pointcloud_msg, transform)
@@ -238,7 +241,7 @@ class MsisProbClouds(Node):
         fan_points[:, 0] = (rc * x_dir).reshape(-1)
         fan_points[:, 1] = (rc * y_dir).reshape(-1)
         fan_points[:, 2] = (r * sin_el).reshape(-1)
-        #Joint probability
+        # Joint probability
         fan_points[:, 3] = (intensity[:, None] * self.el_prob[None, :]).reshape(-1)
 
         return fan_points
