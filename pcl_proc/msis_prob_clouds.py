@@ -11,7 +11,6 @@ from scipy.spatial import cKDTree
 import tf2_ros
 from tf2_ros import TransformException
 import tf2_sensor_msgs.tf2_sensor_msgs
-import sensor_msgs_py.point_cloud2 as pc2
 
 class MsisProbClouds(Node):
 
@@ -28,10 +27,13 @@ class MsisProbClouds(Node):
         self.declare_parameter('vertical_fov_deg', Parameter.Type.DOUBLE)
         self.declare_parameter('resolution', Parameter.Type.DOUBLE)
         self.declare_parameter('min_range', Parameter.Type.DOUBLE)
-        self.declare_parameter('intensity_threshold', Parameter.Type.DOUBLE)
+        self.declare_parameter('noise_floor', Parameter.Type.DOUBLE)
         self.declare_parameter('z_max', Parameter.Type.DOUBLE)
         self.declare_parameter('world_frame_id', Parameter.Type.STRING)
         self.declare_parameter('sensor_frame_id', Parameter.Type.STRING)
+        self.declare_parameter('sound_speed', Parameter.Type.DOUBLE)
+        self.declare_parameter('frequency', Parameter.Type.DOUBLE)
+        self.declare_parameter('aperture_size', Parameter.Type.DOUBLE)
 
         marker_topic = self.get_parameter('marker_topic').value
         cloud_sub_topic = self.get_parameter('cloud_sub_topic').value
@@ -46,7 +48,7 @@ class MsisProbClouds(Node):
         v_fov_deg = self.get_parameter('vertical_fov_deg').value
         resolution = self.get_parameter('resolution').value
         self.min_range = self.get_parameter('min_range').value
-        self.intensity_threshold = self.get_parameter('intensity_threshold').value
+        self.noise_floor = self.get_parameter('noise_floor').value
         self.z_max = self.get_parameter('z_max').value
         self.world_frame_id = self.get_parameter('world_frame_id').value
         self.sensor_frame_id = self.get_parameter('sensor_frame_id').value
@@ -56,8 +58,17 @@ class MsisProbClouds(Node):
         el_angles = np.deg2rad(el_angles_deg)
         self.cos_el = np.cos(el_angles)[None, :]  # (1, E)
         self.sin_el = np.sin(el_angles)[None, :]  # (1, E)
-        # 1.0 to 0.6
-        self.el_prob = (1.0 - 0.4 * np.abs(el_angles_deg) / (v_fov_deg / 2)).astype(np.float32)  # (E,)
+        # Sinc beam directivity: DI = sin(k*h/2*sin(θ)) / (k*h/2*sin(θ))
+        sound_speed = self.get_parameter('sound_speed').value
+        frequency   = self.get_parameter('frequency').value
+        aperture    = self.get_parameter('aperture_size').value
+        wavelength  = sound_speed / frequency
+        k           = 2 * np.pi / wavelength
+        temp        = (k * aperture / 2) * np.sin(el_angles)
+        di          = np.ones_like(temp, dtype=np.float32)
+        nz          = np.abs(temp) > 1e-10
+        di[nz]      = np.sin(temp[nz]) / temp[nz]
+        self.el_prob = np.array([round(float(v), 2) for v in di], dtype=np.float32)[None, :]  # (1, E)
 
         # Static voxel KDTree built once in marker_cb
         self.voxel_tree = None
@@ -82,7 +93,9 @@ class MsisProbClouds(Node):
     def marker_cb(self, msg: Marker):
         self.voxel_centroids = np.array([(p.x, p.y, p.z) for p in msg.points], dtype=np.float32)
         self.voxel_tree = cKDTree(self.voxel_centroids)
-        self.receive_voxel_msg = True
+        self.voxel_resolution = msg.scale.x
+        if not self.receive_voxel_msg:
+            self.receive_voxel_msg = True
 
     # ---------- PointCloud callback ----------
     def cloud_cb(self, msg: PointCloud2):
@@ -90,10 +103,11 @@ class MsisProbClouds(Node):
             return
 
         pointclouds = self.parse_buffer(msg)
-        pointclouds, _ = self.range_filter(pointclouds)
+        pointclouds = self.range_filter(pointclouds)
         pointclouds = self.voxel_max(pointclouds)
         pointclouds = self.convert_to_probabilities(pointclouds)
         fan_points  = self.populate_sonar_fan(pointclouds, self.cos_el, self.sin_el)
+        fan_points  = self.snap_fan_to_voxels(fan_points)
         cloud_msg   = self.build_cloud_msg(msg.header, fan_points)
         cloud_msg   = self.depth_filter(cloud_msg)
         self.pub.publish(cloud_msg)
@@ -114,7 +128,7 @@ class MsisProbClouds(Node):
         return np.column_stack([pts['x'], pts['y'], pts['z'], pts['intensity']])
 
     def range_filter(self, pointclouds):
-        """Range filter + publish aligned intensity profile. Returns (filtered, mask)."""
+        """Range filter + publish aligned intensity profile. Returns filtered."""
         mask = (np.isfinite(pointclouds).all(axis=1) &
                 ((pointclouds[:, 0]**2 + pointclouds[:, 1]**2 + pointclouds[:, 2]**2) > self.min_range**2))
         profile = np.zeros(len(pointclouds), dtype=np.float32)
@@ -122,7 +136,7 @@ class MsisProbClouds(Node):
         msg = Float32MultiArray()
         msg.data = profile.tolist()
         self.pub_range_filter_profile.publish(msg)
-        return pointclouds[mask], mask
+        return pointclouds[mask]
 
     def depth_filter(self, pointcloud_msg):
         """Transform to world frame, filter points above z_max, transform back to sensor frame."""
@@ -135,18 +149,8 @@ class MsisProbClouds(Node):
 
             pointcloud_msg = tf2_sensor_msgs.tf2_sensor_msgs.do_transform_cloud(pointcloud_msg, transform)
 
-            points_struct = pc2.read_points(
-                pointcloud_msg,
-                field_names=('x', 'y', 'z', 'intensity'),
-                skip_nans=False
-            )
-
-            points = np.column_stack((
-                points_struct['x'],
-                points_struct['y'],
-                points_struct['z'],
-                points_struct['intensity']
-            )).astype(np.float32)
+            pts = np.frombuffer(pointcloud_msg.data, dtype=self._parse_dtype)
+            points = np.column_stack([pts['x'], pts['y'], pts['z'], pts['intensity']])
 
             points = points[points[:, 2] <= self.z_max]
             pointcloud_msg.data = points.tobytes()
@@ -163,13 +167,13 @@ class MsisProbClouds(Node):
 
             except TransformException as e:
                 self.get_logger().warn(f'depth_filter: inverse TF lookup failed: {e}')
-                return self._empty_cloud(pointcloud_msg.header)
+                return self.empty_cloud(pointcloud_msg.header)
 
         except TransformException as e:
             self.get_logger().warn(f'depth_filter: TF lookup failed: {e}')
-            return self._empty_cloud(pointcloud_msg.header)
+            return self.empty_cloud(pointcloud_msg.header)
 
-    def _empty_cloud(self, header):
+    def empty_cloud(self, header):
         empty = PointCloud2()
         empty.header = header
         empty.height = 1
@@ -186,10 +190,38 @@ class MsisProbClouds(Node):
         """Assign each point to its nearest voxel centroid; keep max intensity per voxel."""
         if len(pointclouds) == 0:
             return pointclouds
+        
         _, voxel_idx = self.voxel_tree.query(pointclouds[:, :3], k=1, workers=-1)
         order = np.argsort(voxel_idx)
         sorted_vox = voxel_idx[order]
         sorted_pts = pointclouds[order]
+        _, first, counts = np.unique(sorted_vox, return_index=True, return_counts=True)
+        
+        # Find point with max intensity inside the voxel.
+        best = np.array([
+            first[g] + np.argmax(sorted_pts[first[g]:first[g] + counts[g], 3])
+            for g in range(len(first))
+        ], dtype=np.intp)
+        # Map intensity to voxel centroid.
+        result = sorted_pts[best].copy()
+        result[:, :3] = self.voxel_centroids[sorted_vox[best]]
+        return result
+
+    def snap_fan_to_voxels(self, fan_points):
+        """Snap each fan arc point to its nearest voxel centroid; discard out-of-bounds; keep max intensity per voxel."""
+        if len(fan_points) == 0:
+            return fan_points
+        _, voxel_idx = self.voxel_tree.query(fan_points[:, :3], k=1, workers=-1)
+        half = self.voxel_resolution / 2.0
+        diff = np.abs(fan_points[:, :3] - self.voxel_centroids[voxel_idx])
+        in_voxel = np.all(diff <= half, axis=1)
+        fan_points = fan_points[in_voxel]
+        voxel_idx = voxel_idx[in_voxel]
+        if len(fan_points) == 0:
+            return fan_points
+        order = np.argsort(voxel_idx)
+        sorted_vox = voxel_idx[order]
+        sorted_pts = fan_points[order]
         _, first, counts = np.unique(sorted_vox, return_index=True, return_counts=True)
         best = np.array([
             first[g] + np.argmax(sorted_pts[first[g]:first[g] + counts[g], 3])
@@ -214,8 +246,8 @@ class MsisProbClouds(Node):
         return cloud_msg
 
     def convert_to_probabilities(self, pointclouds):
-        """Convert intensity to occupancy probability: <20→0.2, ≥20→0.9."""
-        prob = np.where(pointclouds[:, 3] >= self.intensity_threshold, 0.9, 0.2)
+        """Convert intensity to occupancy probability: <noise floor→0.2, ≥noise floor→0.9."""
+        prob = np.where(pointclouds[:, 3] >= self.noise_floor, 0.9, 0.2)
         pointclouds[:, 3] = prob
         return pointclouds
 
@@ -242,7 +274,7 @@ class MsisProbClouds(Node):
         fan_points[:, 1] = (rc * y_dir).reshape(-1)
         fan_points[:, 2] = (r * sin_el).reshape(-1)
         # Joint probability
-        fan_points[:, 3] = (intensity[:, None] * self.el_prob[None, :]).reshape(-1)
+        fan_points[:, 3] = (intensity[:, None] * self.el_prob).reshape(-1)
 
         return fan_points
 

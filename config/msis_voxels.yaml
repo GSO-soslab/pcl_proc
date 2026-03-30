@@ -11,9 +11,12 @@
     frame_id: "alpha_rise/ping360_link"
     
     # msis_prob_clouds
+    sound_speed: 1500.0
+    frequency: 750000.0 #750lHz
+    aperture_size: 0.0049 
     world_frame_id: "alpha_rise/world"
     sensor_frame_id: "alpha_rise/ping360_link"
-    intensity_threshold: 20.0
+    noise_floor: 20.0
     min_range: 5.0
     z_max: -1.0
     cloud_sub_topic: /alpha_rise/msis/pointcloud
