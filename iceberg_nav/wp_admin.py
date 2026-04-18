@@ -53,7 +53,9 @@ class Wp_Admin(Node):
         #To remove surface reflections from FLS, this is the min depth, the vehicle must be at.
         # self.depth = -math.tan(math.radians(self.depth)) * self.standoff_distance_in_meters
 
+        self.declare_parameter('search_mode_depth', Parameter.Type.DOUBLE)
         self.declare_parameter('search_mode_initial_radius', Parameter.Type.DOUBLE)
+        self.declare_parameter('search_mode_max_circles', Parameter.Type.INTEGER)
         self.declare_parameter('search_mode_timer', Parameter.Type.INTEGER)
         self.declare_parameter('follow_mode_timer',Parameter.Type.INTEGER)
         self.declare_parameter('exit_mode_distance',Parameter.Type.DOUBLE)
@@ -64,7 +66,9 @@ class Wp_Admin(Node):
 
 
         # Read parameters
+        self.search_mode_depth = self.get_parameter('search_mode_depth').get_parameter_value().double_value
         self.search_mode_initial_radius = self.get_parameter('search_mode_initial_radius').get_parameter_value().double_value
+        self.search_mode_max_circles = self.get_parameter('search_mode_max_circles').get_parameter_value().integer_value
 
         # Timers
         self.search_mode_timer_param = self.get_parameter('search_mode_timer').get_parameter_value().integer_value
@@ -109,7 +113,7 @@ class Wp_Admin(Node):
         self.create_timer(self.update_rate, self.check_state)
         
         self.tf_buffer = tf2_ros.Buffer()
-        listener = tf2_ros.TransformListener(self.tf_buffer,self)
+        self.listener = tf2_ros.TransformListener(self.tf_buffer,self)
 
         self.node_name = self.get_name()
 
@@ -130,8 +134,12 @@ class Wp_Admin(Node):
         self.valid_best_point = True
 
         self.bool_exit_mode = False
+        self.search_mode_complete = False
 
         self.mission_command = "EMPTY"
+
+        self.base_to_odom_tf = None
+        self.odom_to_base_tf = None
 
         self.get_logger().info("Administrator launched. Use /alpha_rise/mission service to engage. START, RESTART or CONTINUE")
 
@@ -187,6 +195,8 @@ class Wp_Admin(Node):
         """
         Best point callback.
         """
+        if self.base_to_odom_tf is None:
+            return
         vx = round(self.base_to_odom_tf.transform.translation.x)
         vy = round(self.base_to_odom_tf.transform.translation.y)
 
@@ -256,13 +266,16 @@ class Wp_Admin(Node):
             self.mission_core(msg)
         
     def mission_core(self, msg):
-        #Vx position and bearing in Odom frame.
-        self.base_to_odom_tf = self.tf_buffer.lookup_transform("alpha_rise/odom", "alpha_rise/base_link", 
-                                                            rclpy.time.Time())
-        
-        #Odom frame point in Vx frame
-        self.odom_to_base_tf = self.tf_buffer.lookup_transform("alpha_rise/base_link", "alpha_rise/odom", 
-                                                            rclpy.time.Time())
+        try:
+            #Vx position and bearing in Odom frame.
+            self.base_to_odom_tf = self.tf_buffer.lookup_transform("alpha_rise/odom", "alpha_rise/base_link",
+                                                                rclpy.time.Time())
+            #Odom frame point in Vx frame
+            self.odom_to_base_tf = self.tf_buffer.lookup_transform("alpha_rise/base_link", "alpha_rise/odom",
+                                                                rclpy.time.Time())
+        except Exception as e:
+            self.get_logger().warn(f"TF lookup failed in mission_core: {e}", throttle_duration_sec=5)
+            return
         #Create Waypoint Message
         wpts = Waypoints()
         self.header = msg.header
@@ -309,7 +322,7 @@ class Wp_Admin(Node):
                     #grab time of follow_mode initializing
                     if self.follow_flag == 0:
                         self.follow_mode_timer = time.time()
-                        self.follow_flag =+ 1
+                        self.follow_flag = 1
                     
                     self.get_logger().info(f"Following Mode in {self.state} with {round(self.follow_mode_timer_param - (time.time() - self.follow_mode_timer))}s remaining", throttle_duration_sec = 15)
 
@@ -361,7 +374,7 @@ class Wp_Admin(Node):
         #We use that parameter to create a new bhvr mode.
         else:
             # rospy.loginfo("Searching Mode")
-            if self.state == "start":
+            if self.state == "start" and not self.search_mode_complete:
                 self.count_concentric_circles += 1
                 self.search_mode(wpts)
 
@@ -369,7 +382,7 @@ class Wp_Admin(Node):
                 #If timer runs out, then the node is killed.
                 if(time.time() - self.search_mode_timer) > self.search_mode_timer_param: #sec
                     request = ChangeState.Request()
-                    request.state = "start"
+                    request.state = "kill"
                     request.caller = self.node_name
                     future = self.change_state_service_client.call_async(request)
                     future.add_done_callback(self.get_state_callback)
@@ -440,16 +453,29 @@ class Wp_Admin(Node):
         msg.data=2
         self.pub_state.publish(msg)
         self.get_logger().info(info)
-        time.sleep(10)
+        if not hasattr(self, '_exit_reset_timer') or self._exit_reset_timer.is_canceled():
+            self._exit_reset_timer = self.create_timer(10.0, self._exit_mode_reset)
+
+    def _exit_mode_reset(self):
+        self._exit_reset_timer.cancel()
         self.mission_command = "EMPTY"
         self.count_concentric_circles = 0
         self.bool_search_mode = False
 
     def search_mode(self, wpts):
+        if self.count_concentric_circles > self.search_mode_max_circles:
+            self.get_logger().warn(f"Search limit of {self.search_mode_max_circles} circles exceeded — shutting down")
+            request = ChangeState.Request()
+            request.state = "kill"
+            request.caller = self.node_name
+            future = self.change_state_service_client.call_async(request)
+            future.add_done_callback(self.get_state_callback)
+            self.destroy_node()
+            return
+
         self.bool_search_mode = True
 
-        #Change here for initial depth.
-        search_mode_depth = round(-(math.tan(math.radians(12.5)) * 50),2)
+        search_mode_depth = self.search_mode_depth
         """
         Function to navigate the vehicle 
         to start searching for iceberg at depth.
@@ -466,7 +492,7 @@ class Wp_Admin(Node):
         
         #Grow the search radius incrementally.
         search_mode_radius = self.search_mode_initial_radius * self.count_concentric_circles
-        search_mode_points = self.draw_arc(number_of_points=self.n_points, 
+        search_mode_points = self.draw_arc(number_of_points=8, 
                                             start_angle=0, 
                                             end_angle=2*math.pi,
                                             center=[center_in_vx_frame.point.x, center_in_vx_frame.point.y],
@@ -489,9 +515,9 @@ class Wp_Admin(Node):
         future = self.change_state_service_client.call_async(request)
         future.add_done_callback(self.get_state_callback)
         self.pub_update.publish(wpts)
+        self.search_mode_complete = True
         self.get_logger().info("Search Mode", throttle_duration_sec = 3)
         self.state = "survey"
-        time.sleep(1)
 
     def iceberg_reacquisition_mode(self, wpts):
         """
@@ -507,7 +533,7 @@ class Wp_Admin(Node):
             future.add_done_callback(self.get_state_callback)
         #The center point of the circle in vx frame
         point_of_obstacle = [self.reacquisition_s_param*self.standoff_distance_in_meters, -self.standoff_distance_in_meters]
-        corner_bhvr_points = self.draw_arc(number_of_points=self.n_points, 
+        corner_bhvr_points = self.draw_arc(number_of_points=8, 
                                                    start_angle=math.pi/2, 
                                                    end_angle=0,
                                                    center=point_of_obstacle,
@@ -530,31 +556,6 @@ class Wp_Admin(Node):
         self.pub_update.publish(wpts)
 
 
-    def reaquisition_points(self):
-        x0 = self.closest_terminal_pose.pose.position.x
-        y0 = self.closest_terminal_pose.pose.position.y
-
-        # Circle radius
-        r = self.standoff_distance_in_meters  # meters, adjust as needed
-
-        # Center for clockwise arc (example: center below starting point)
-        xc = x0
-        yc = y0 - r
-
-        # Generate points along arc (45 degrees)
-        num_points = 10
-        theta_start = math.pi/2   # start angle relative to center
-        theta_end   = math.pi/2 - math.pi/4  # clockwise 45 degrees
-        arc_points = []
-
-        for i in range(num_points + 1):
-            theta = theta_start + (theta_end - theta_start) * i / num_points
-            x = xc + r * math.cos(theta)
-            y = yc + r * math.sin(theta)
-            arc_points.append((x, y))
-
-        return arc_points
-    
     def check_state(self):
         """
         Function to check the state of the helm
