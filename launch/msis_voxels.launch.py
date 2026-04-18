@@ -9,13 +9,13 @@ def generate_launch_description():
     ld = LaunchDescription()
 
     param_config = os.path.join(
-        get_package_share_directory('pcl_proc'),
+        get_package_share_directory('iceberg_nav'),
         'config',
         'msis_voxels.yaml'
     )
 
     msis_voxels_node = Node(
-        package='pcl_proc',
+        package='iceberg_nav',
         executable='msis_voxels',
         name='msis_voxel_node',
         namespace='alpha_rise',
@@ -24,7 +24,7 @@ def generate_launch_description():
     )
 
     msis_prob_clouds_node = Node(
-        package='pcl_proc',
+        package='iceberg_nav',
         executable='msis_prob_clouds.py',
         name='msis_prob_clouds',
         namespace='alpha_rise',

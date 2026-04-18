@@ -15,13 +15,13 @@ def generate_launch_description():
     param_config = os.path.join(
         get_package_share_directory('iceberg_nav'),
         'config',
-        'filter.yaml'
+        'voxel_log_odds.yaml'
     )
     
     node = Node(
         package='iceberg_nav',
-        executable='filter.py',
-        name='pcl_filter_node',
+        executable='voxel_log_odds_visualizer',
+        name='voxel_log_odds_visualizer',
         namespace="alpha_rise",
         output='screen',
         parameters=[param_config]

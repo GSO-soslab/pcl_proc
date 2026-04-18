@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>pcl_proc</name>
+  <name>iceberg_nav</name>
   <version>0.1.0</version>
-  <description>The pcl_proc package</description>
+  <description>The iceberg_nav package</description>
 
   <maintainer email="tony.jacob@uri.edu">Tony Jacob</maintainer>
   <license>BSD</license> 
@@ -28,6 +28,11 @@
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>mvp_msgs</exec_depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
   <!-- Export section -->
   <export>
     <build_type>ament_cmake</build_type>

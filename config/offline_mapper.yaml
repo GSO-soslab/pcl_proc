@@ -1,0 +1,34 @@
+offline_mapper:
+  # Input / output
+  bag_path: "/home/tony/auv_ws/bags/sim_loop/my_bag"
+  output_pcd: "/home/tony/auv_ws/ice_1.pcd"
+  save_npz: false          # also save raw logodds grid as .npz
+
+  # Source mode
+  sim: True               # true → sim bag (stonefish); skips Ping, derives bearings from image width
+  image_topic_filter: '/alpha_rise/stonefish/fls/data/image'      # substring match for image topic; set to e.g. 'stonefish/fls/data/image' for sim
+  fls_child_link: 'alpha_rise/fls_link_sf'           # child link name used in URDF base→fls joint lookup; sim may use 'fls_link_sf'
+
+  # Voxel map — mirrors voxel_log_odds.yaml
+  voxel_resolution: 5.0   # KEY param: change freely without real-time lag
+  logodds_min: -20.0
+  logodds_max: 20.0
+  probability_threshold: 0.8
+  depth_deviation: 1.0
+  z_cutoff: -1.0
+
+  # Voxel FOV geometry — mirrors fls_params.yaml (fls_voxel_node section)
+  range_max: 40.0
+  horizontal_fov_deg: 70.0
+  vertical_fov_deg: 12.0
+  spacing_angle_deg: 1.0   # elevation angle step (1° → 13 angles over ±6°)
+
+  # FLS sensor model — mirrors fls_params.yaml (fls_pcl_node section)
+  threshold_min_range: 5.0  # meters; discard points closer than this
+  lower_bound_intensity: 22
+  upper_bound_intensity: 50
+  min_probability: 0.2
+  max_probability: 0.9
+  aperture_size: 0.0067     # meters
+  frequency: 1.2e6          # Hz
+  sound_speed: 1500         # m/s

@@ -13,13 +13,13 @@ def generate_launch_description():
     ld = LaunchDescription()
 
     param_config = os.path.join(
-        get_package_share_directory('pcl_proc'),
+        get_package_share_directory('iceberg_nav'),
         'config',
         'msis.yaml'
     )
 
     node = Node(
-        package='pcl_proc',
+        package='iceberg_nav',
         executable='msis_pcl',
         name='msis_pcl_node',
         namespace="alpha_rise",

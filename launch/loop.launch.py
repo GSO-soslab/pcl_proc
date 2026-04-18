@@ -13,13 +13,13 @@ def generate_launch_description():
     ld = LaunchDescription()
 
     param_config = os.path.join(
-        get_package_share_directory('pcl_proc'),
+        get_package_share_directory('iceberg_nav'),
         'config',
         'loop.yaml'
     )
     
     node = Node(
-        package='pcl_proc',
+        package='iceberg_nav',
         executable='loop.py',
         name='loop_checker',
         namespace="alpha_rise",

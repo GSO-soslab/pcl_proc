@@ -13,13 +13,13 @@ def generate_launch_description():
     ld = LaunchDescription()
 
     param_config = os.path.join(
-        get_package_share_directory('pcl_proc'),
+        get_package_share_directory('iceberg_nav'),
         'config',
         'path_gen.yaml'
     )
     
     node = Node(
-        package='pcl_proc',
+        package='iceberg_nav',
         executable='path_gen.py',
         name='path_generator',
         namespace="alpha_rise",
