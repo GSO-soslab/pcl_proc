@@ -14,22 +14,6 @@ Clone this [fork](https://github.com/GSO-soslab/navigation2) of nav2 (required f
 ---
 
 ## Nodes
-
-### `msis_pcl` — `src/msis_pcl.cpp`
-
-Converts raw MSIS sonar images or `SonarEcho` messages into a `PointCloud2` in the sensor frame. Each beam angle produces a column of 3D points at the measured range, filtered by a minimum range threshold.
-
-**Subscribes**
-| Type | Description |
-|---|---|
-| `Image` | Raw MSIS polar image |
-| `SonarEcho` | Sonar beam echo (hardware) |
-
-**Publishes**
-| Type | Description |
-|---|---|
-| `PointCloud2` | 3D point cloud in sensor frame |
-
 ---
 
 ### `msis_voxels` — `src/msis_voxels.cpp`
@@ -86,22 +70,6 @@ Accumulates probabilistic point clouds into a 3D log-odds occupancy voxel map. T
 
 ---
 
-### `filter` — `iceberg_nav/filter.py`
-
-Filters MSIS point clouds using radial binning and statistical outlier removal. Removes points beyond a configurable range and those whose intensity deviates beyond a std-dev multiplier threshold.
-
-**Subscribes**
-| Type | Description |
-|---|---|
-| `PointCloud2` | Raw MSIS point cloud |
-
-**Publishes**
-| Type | Description |
-|---|---|
-| `PointCloud2` | Filtered point cloud |
-
----
-
 ### `path_gen` — `iceberg_nav/path_gen.py`
 
 Generates a circumnavigation path around the iceberg from a 2D costmap. Applies Canny edge detection to extract the iceberg boundary, fits a standoff curve at a configurable offset, samples waypoints, and publishes the path. Supports a spiral search mode for initial acquisition.
@@ -129,45 +97,4 @@ Autonomy state machine. Converts the generated path into MVP waypoints and manag
 |---|---|
 | `Path` | Circumnavigation path from `path_gen` |
 | `Float32` | Distance-to-obstacle estimate |
-
-**Calls Services**
-| Service | Description |
-|---|---|
-| `GetState` / `ChangeState` | MVP controller state management |
-| `GetWaypoints` | Reads active waypoints from MVP |
-
 ---
-
-### `loop` — `iceberg_nav/loop.py`
-
-Estimates iceberg drift velocity using AKAZE feature matching between the current and stored costmap images. Publishes the estimated iceberg odometry and triggers revisit behavior when a loop closure is detected.
-
-**Subscribes**
-| Type | Description |
-|---|---|
-| `Image` | Local costmap image |
-| `Odometry` | Vehicle odometry |
-| `Int16` | Autonomy state |
-
-**Publishes**
-| Type | Description |
-|---|---|
-| `Odometry` | Estimated iceberg odometry |
-| `Image` | Global costmap image |
-| `Image` | Feature match visualization |
-
----
-
-## Launch Files
-
-| Launch File | Description |
-|---|---|
-| `msis_pcl.launch.py` | Starts `msis_pcl` |
-| `msis_voxels.launch.py` | Starts `msis_voxels` and `msis_prob_clouds` |
-| `voxel_log_odds.launch.py` | Starts `voxel_log_odds_visualizer` |
-| `filter.launch.py` | Starts `filter` |
-| `costmap.launch.py` | Starts nav2 costmap node |
-| `path_gen.launch.py` | Starts `path_gen` |
-| `wp_admin.launch.py` | Starts `wp_admin` |
-| `loop.launch.py` | Starts `loop` |
-| `post_process.launch.py` | Offline post-processing pipeline |

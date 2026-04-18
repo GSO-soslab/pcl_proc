@@ -3,49 +3,21 @@ from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, ExecuteProcess
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from ament_index_python.packages import get_package_share_directory
-from launch_ros.actions import Node
+from launch_ros.actions import Node  # used by rviz
 
 def generate_launch_description():
 
     ld = LaunchDescription()
 
-    msis_voxel_prob = IncludeLaunchDescription(
+    inv_models = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
-                get_package_share_directory('iceberg_nav'),
+                get_package_share_directory('alpha_rise_bringup'),
                 'launch',
-                'msis_voxels.launch.py'
+                'bringup_inv_models.launch.py'
             )
         ),
-        launch_arguments={
-            'use_sim_time': 'true'
-        }.items()
-    )
-
-    voxel_log_odds = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                get_package_share_directory('iceberg_nav'),
-                'launch',
-                'voxel_log_odds.launch.py'
-            )
-        ),
-        launch_arguments={
-            'use_sim_time': 'true'
-        }.items()
-    )
-
-    fls_voxel_prob = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                get_package_share_directory('fls_ism'),
-                'launch',
-                'fls_ism.launch.py'
-            )
-        ),
-        launch_arguments={
-            'use_sim_time': 'true'
-        }.items()
+        launch_arguments={'use_sim_time': 'true'}.items()
     )
 
 
@@ -76,17 +48,6 @@ def generate_launch_description():
                 get_package_share_directory('fls_ism'),
                 'launch',
                 'octomap_mapping.launch.py'
-            )
-        ),
-        launch_arguments={'use_sim_time': 'true'}.items()
-    )
-
-    mbes_inv = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                get_package_share_directory('mbes_ism'),
-                'launch',
-                'mbes_ism.launch.py'
             )
         ),
         launch_arguments={'use_sim_time': 'true'}.items()
@@ -161,10 +122,7 @@ def generate_launch_description():
     ld.add_action(bag_play)
 
     ld.add_action(description)
-    ld.add_action(fls_voxel_prob)
-    ld.add_action(msis_voxel_prob)
-    ld.add_action(voxel_log_odds)
-    ld.add_action(mbes_inv)
+    ld.add_action(inv_models)
     ld.add_action(rviz)
     ld.add_action(path)
     # ld.add_action(octomap)
