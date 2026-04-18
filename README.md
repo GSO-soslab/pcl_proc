@@ -5,7 +5,7 @@ Navigation and perception package for AUV-based iceberg circumnavigation. Conver
 ## Dependencies
 
 ```bash
-sudo apt-get install ros-jazzy-nav2-costmap-2d ros-jazzy-tf2-ros ros-jazzy-cv-bridge ros-jazzy-image-transport libboost-all-dev
+sudo apt-get install ros-jazzy-tf2-ros ros-jazzy-cv-bridge ros-jazzy-image-transport libboost-all-dev
 pip install scipy scikit-learn
 ```
 
