@@ -135,6 +135,7 @@ class Wp_Admin(Node):
 
         self.bool_exit_mode = False
         self.search_mode_complete = False
+        self._reacquisition_active = False
 
         self.mission_command = "EMPTY"
 
@@ -266,6 +267,8 @@ class Wp_Admin(Node):
             self.mission_core(msg)
         
     def mission_core(self, msg):
+        if self._reacquisition_active:
+            return
         try:
             #Vx position and bearing in Odom frame.
             self.base_to_odom_tf = self.tf_buffer.lookup_transform("alpha_rise/odom", "alpha_rise/base_link",
@@ -521,39 +524,43 @@ class Wp_Admin(Node):
 
     def iceberg_reacquisition_mode(self, wpts):
         """
-        Function to navigate the vehicle 
+        Function to navigate the vehicle
         so as to reacquire acoustic contact
         """
-        #Switch state to survey_3d
         if self.state == "start":
+            self._reacquisition_active = True
+            self._reacquisition_timer = self.create_timer(5.0, self._reacquisition_hold_done)
+
             request = ChangeState.Request()
             request.state = "survey"
             request.caller = self.node_name
             future = self.change_state_service_client.call_async(request)
             future.add_done_callback(self.get_state_callback)
-        #The center point of the circle in vx frame
-        point_of_obstacle = [self.reacquisition_s_param*self.standoff_distance_in_meters, -self.standoff_distance_in_meters]
-        corner_bhvr_points = self.draw_arc(number_of_points=8, 
-                                                   start_angle=math.pi/2, 
-                                                   end_angle=0,
-                                                   center=point_of_obstacle,
-                                                   radius = self.standoff_distance_in_meters)
-    
-        #Append the waypoints
-        for i in range(len(corner_bhvr_points)):
+
+        point_of_obstacle = [self.reacquisition_s_param * self.standoff_distance_in_meters,
+                             -self.standoff_distance_in_meters]
+        corner_bhvr_points = self.draw_arc(number_of_points=8,
+                                           start_angle=math.pi/2,
+                                           end_angle=0,
+                                           center=point_of_obstacle,
+                                           radius=self.standoff_distance_in_meters)
+        for pt in corner_bhvr_points:
             wpt = Waypoint()
             wpt.header = self.header
             wpt.u = self.reacquisition_surge
-            
             msg = Point()
-            msg.x = corner_bhvr_points[i].point.x 
-            msg.y = corner_bhvr_points[i].point.y
+            msg.x = pt.point.x
+            msg.y = pt.point.y
             msg.z = self.depth
             wpt.wpt = msg
-      
             wpts.wpt.append(wpt)
-        self.get_logger().info("Iceberg Reacquisition Mode", throttle_duration_sec = 3)
+
+        self.get_logger().info("Iceberg Reacquisition Mode", throttle_duration_sec=3)
         self.pub_update.publish(wpts)
+
+    def _reacquisition_hold_done(self):
+        self._reacquisition_active = False
+        self._reacquisition_timer.cancel()
 
 
     def check_state(self):
