@@ -89,6 +89,10 @@ public:
         this->declare_parameter<double>("z_cutoff", -1.0);
         this->get_parameter("z_cutoff", z_cutoff_);
 
+        // --- Decay ---
+        this->declare_parameter<double>("decay_time", -1.0);
+        this->get_parameter("decay_time", decay_time_);
+
         // --- PCD export ---
         this->declare_parameter<bool>("save_pcd", false);
         this->get_parameter("save_pcd", save_pcd_);
@@ -123,6 +127,12 @@ public:
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
+        if (decay_time_ > 0.0) {
+            decay_timer_ = this->create_wall_timer(1s,
+                std::bind(&VoxelLogOddsVisualizer::decayCallback, this));
+            RCLCPP_INFO(this->get_logger(), "Voxel decay enabled: %.1f s", decay_time_);
+        }
+
         RCLCPP_INFO(this->get_logger(), "VoxelLogOddsVisualizer initialized. Grid size: %.2fm, resolution: %.2fm",
                     global_costmap_dim_, voxel_res_);
     }
@@ -153,6 +163,7 @@ private:
     double half_grid_;
     int n_voxels_;
     std::unordered_map<VoxelKey, double, KeyHash> logodds_grid_;
+    std::unordered_map<VoxelKey, rclcpp::Time, KeyHash> last_seen_;
 
     // --- Costmaps ---
     double global_costmap_dim_;   // meters
@@ -160,6 +171,7 @@ private:
     double depth_deviation_;
     double z_cutoff_;
     double vehicle_z_{0.0};
+    double decay_time_{-1.0};     // seconds a voxel survives without a new hit; -1 = disabled
 
     // --- PCD export ---
     bool save_pcd_;
@@ -170,6 +182,7 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr prob_cloud_pub_;
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr global_ogm_pub_;
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr local_ogm_pub_;
+    rclcpp::TimerBase::SharedPtr decay_timer_;
 
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -306,6 +319,10 @@ private:
 
             // Clip
             logodds_grid_[key] = std::min(std::max(logodds_grid_[key], logodds_min_), logodds_max_);
+
+            if (decay_time_ > 0.0) {
+                last_seen_[key] = this->get_clock()->now();
+            }
 
         }
 
@@ -482,6 +499,22 @@ private:
         }
 
         local_ogm_pub_->publish(og);
+    }
+
+    void decayCallback() {
+        const rclcpp::Time now = this->get_clock()->now();
+        const rclcpp::Duration threshold = rclcpp::Duration::from_seconds(decay_time_);
+
+        std::vector<VoxelKey> to_erase;
+        for (const auto& kv : last_seen_) {
+            if ((now - kv.second) >= threshold) {
+                to_erase.push_back(kv.first);
+            }
+        }
+        for (const auto& key : to_erase) {
+            logodds_grid_.erase(key);
+            last_seen_.erase(key);
+        }
     }
 
     Eigen::Matrix4f transformToMatrix(const geometry_msgs::msg::TransformStamped &trans) {
