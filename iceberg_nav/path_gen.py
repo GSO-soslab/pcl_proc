@@ -18,8 +18,6 @@ import numpy as np
 import cv2
 import math
 import scipy.optimize
-import os
-import sys
 import path_utils
 import time
 from cv_bridge import CvBridge
@@ -48,7 +46,6 @@ class PathGen(Node):
         self.declare_parameter('distance_constraint', Parameter.Type.DOUBLE)
         self.declare_parameter('surge_velocity',Parameter.Type.DOUBLE)
         self.declare_parameter('max_yaw_rate',Parameter.Type.DOUBLE)
-        self.declare_parameter('sim', Parameter.Type.BOOL)
 
         # Get parameters
         self.odom_frame = self.get_parameter('odom_frame').get_parameter_value().string_value
@@ -68,7 +65,6 @@ class PathGen(Node):
         self.distance_constraint = self.get_parameter('distance_constraint').get_parameter_value().double_value
         self.max_surge = self.get_parameter('surge_velocity').get_parameter_value().double_value
         self.max_yaw_rate = self.get_parameter('max_yaw_rate').get_parameter_value().double_value
-        self.sim = self.get_parameter('sim').get_parameter_value().bool_value
 
         if enable_search_mode:
             self.minimum_depth_for_path = -(math.tan(math.radians(msis_vertical_beamwidth / 2)) * self.distance_in_meters)
@@ -172,9 +168,11 @@ class PathGen(Node):
         if self.costmap_method != "nav2":
             data = cv2.bitwise_not(data)
 
-        if not self.sim:
-            kernel = np.ones((3,3), np.uint8)
-            dilate = cv2.morphologyEx(data, cv2.MORPH_OPEN, kernel, iterations=1)
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(data, connectivity=8)
+        data = np.zeros_like(data)
+        for label in range(1, num_labels):
+            if stats[label, cv2.CC_STAT_AREA] >= 10:
+                data[labels == label] = 255
         costmap_image_ros = self.bridge.cv2_to_imgmsg(data)
         costmap_image_ros.header.stamp = self.time
         costmap_image_ros.header.frame_id = self.odom_frame
@@ -214,10 +212,7 @@ class PathGen(Node):
             viz_edges = path_utils.compare_two_lists(raw_pixels, edge, self.height, self.width)
             compare_edge = path_utils.compare_points_with_image(vx_frame_image_copy, np.int_(path_cells))
 
-            if not self.sim:
-                mix= np.hstack((data, dilate,canny_image, viz_edges, compare_path, compare_edge))
-            else:
-                mix= np.hstack((data,canny_image, viz_edges, compare_path, compare_edge))
+            mix= np.hstack((data,canny_image, viz_edges, compare_path, compare_edge))
             image_msg = self.bridge.cv2_to_imgmsg(mix)
             self.image_process_pipeline_pub.publish(image_msg)
         
