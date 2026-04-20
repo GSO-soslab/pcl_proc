@@ -48,6 +48,7 @@ class PathGen(Node):
         self.declare_parameter('distance_constraint', Parameter.Type.DOUBLE)
         self.declare_parameter('surge_velocity',Parameter.Type.DOUBLE)
         self.declare_parameter('max_yaw_rate',Parameter.Type.DOUBLE)
+        self.declare_parameter('sim', Parameter.Type.BOOL)
 
         # Get parameters
         self.odom_frame = self.get_parameter('odom_frame').get_parameter_value().string_value
@@ -67,6 +68,7 @@ class PathGen(Node):
         self.distance_constraint = self.get_parameter('distance_constraint').get_parameter_value().double_value
         self.max_surge = self.get_parameter('surge_velocity').get_parameter_value().double_value
         self.max_yaw_rate = self.get_parameter('max_yaw_rate').get_parameter_value().double_value
+        self.sim = self.get_parameter('sim').get_parameter_value().bool_value
 
         if enable_search_mode:
             self.minimum_depth_for_path = -(math.tan(math.radians(msis_vertical_beamwidth / 2)) * self.distance_in_meters)
@@ -170,11 +172,10 @@ class PathGen(Node):
         if self.costmap_method != "nav2":
             data = cv2.bitwise_not(data)
 
-        kernel = np.ones((3,3), np.uint8)
-        # Opening (erode then dilate) removes speckle noise while preserving obstacle shape
-        dilate = cv2.morphologyEx(data, cv2.MORPH_OPEN, kernel, iterations=1)
-
-        costmap_image_ros = self.bridge.cv2_to_imgmsg(dilate)
+        if not self.sim:
+            kernel = np.ones((3,3), np.uint8)
+            dilate = cv2.morphologyEx(data, cv2.MORPH_OPEN, kernel, iterations=1)
+        costmap_image_ros = self.bridge.cv2_to_imgmsg(data)
         costmap_image_ros.header.stamp = self.time
         costmap_image_ros.header.frame_id = self.odom_frame
         self.costmap_image_pub.publish(costmap_image_ros)
@@ -183,7 +184,7 @@ class PathGen(Node):
         Edges, Lines and Curves
         """
         #Get Edge
-        canny_image = cv2.Canny(dilate,self.canny_min,self.canny_max)
+        canny_image = cv2.Canny(data,self.canny_min,self.canny_max)
         #Find cordinates of the edges
         raw_pixels = path_utils.find_cordinates_of_max_value(canny_image)
         #Get usable edges
@@ -213,7 +214,10 @@ class PathGen(Node):
             viz_edges = path_utils.compare_two_lists(raw_pixels, edge, self.height, self.width)
             compare_edge = path_utils.compare_points_with_image(vx_frame_image_copy, np.int_(path_cells))
 
-            mix= np.hstack((data, dilate,canny_image, viz_edges, compare_path, compare_edge))
+            if not self.sim:
+                mix= np.hstack((data, dilate,canny_image, viz_edges, compare_path, compare_edge))
+            else:
+                mix= np.hstack((data,canny_image, viz_edges, compare_path, compare_edge))
             image_msg = self.bridge.cv2_to_imgmsg(mix)
             self.image_process_pipeline_pub.publish(image_msg)
         
@@ -382,6 +386,9 @@ class PathGen(Node):
             """
             # Shift back to Image frame
             cartesian_coordinates = [[int(x+self.width//2),int(self.height//2 - y)] for x, y in cartesian_coordinates]
+
+            # Discard points to the left of the vehicle (x < image center)
+            cartesian_coordinates = [pt for pt in cartesian_coordinates if pt[0] >= self.width//2]
             """ 
             ------>xCOSTMAP IMAGE
             |
