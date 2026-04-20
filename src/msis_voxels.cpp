@@ -5,6 +5,7 @@
 #include <visualization_msgs/msg/marker.hpp>
 #include <geometry_msgs/msg/point.hpp>
 #include <ping360_msgs/msg/sonar_echo.hpp>
+#include <std_msgs/msg/float32.hpp>
 
 using std::placeholders::_1;
 // Distance across elevation : tan(12.5)*2*50  = 22.1m
@@ -20,31 +21,46 @@ public:
         this->declare_parameter("horizontal_fov_deg", 2.0);
         this->declare_parameter("vertical_fov_deg", 25.0);
         this->declare_parameter("resolution", 1.0);
-        this->declare_parameter("frame_id", "alpha_rise/ping360_link");
         this->declare_parameter<std::string>("marker_topic");
+        this->declare_parameter("sim", false);
+        this->declare_parameter<std::string>("cloud_sub_topic", "");
+        this->declare_parameter<std::string>("sensor_frame_id", "alpha_rise/ping360_link");
+        this->declare_parameter<std::string>("echo_sub_topic", "/alpha_rise/msis/echo");
 
         this->get_parameter("range_max", max_range_);
         double h_fov_deg, v_fov_deg;
         this->get_parameter("horizontal_fov_deg", h_fov_deg);
         this->get_parameter("vertical_fov_deg", v_fov_deg);
         this->get_parameter("resolution", resolution_);
-        this->get_parameter("frame_id", frame_id_);
+        this->get_parameter("sensor_frame_id", frame_id_);
         std::string marker_topic;
         this->get_parameter("marker_topic", marker_topic);
+        bool sim;
+        this->get_parameter("sim", sim);
 
         h_fov_ = h_fov_deg * M_PI / 180.0;
         v_fov_ = v_fov_deg * M_PI / 180.0;
 
         marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>(marker_topic, 10);
 
-        subscription_ = this->create_subscription<ping360_msgs::msg::SonarEcho>(
-            "/alpha_rise/msis/echo", 10, std::bind(&MSISVoxels::echo_callback, this, _1));
+        if (sim) {
+            std::string cloud_topic;
+            this->get_parameter("cloud_sub_topic", cloud_topic);
+            angle_sub_ = this->create_subscription<std_msgs::msg::Float32>(
+                cloud_topic + "/current_angle", 10, std::bind(&MSISVoxels::angle_callback, this, _1));
+        } else {
+            std::string echo_topic;
+            this->get_parameter("echo_sub_topic", echo_topic);
+            echo_sub_ = this->create_subscription<ping360_msgs::msg::SonarEcho>(
+                echo_topic, 10, std::bind(&MSISVoxels::echo_callback, this, _1));
+        }
     }
 
 private:
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
-    rclcpp::Subscription<ping360_msgs::msg::SonarEcho>::SharedPtr subscription_;
-
+    rclcpp::Subscription<ping360_msgs::msg::SonarEcho>::SharedPtr echo_sub_;
+    rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr angle_sub_;
+    
     double max_range_;
     double h_fov_;
     double v_fov_;
@@ -68,6 +84,12 @@ private:
         double yaw = msg->angle;
         voxels(yaw);
         // marker_outline(yaw); // optional
+    }
+
+    // ---------------- Sim callbacks ----------------
+    void angle_callback(const std_msgs::msg::Float32::SharedPtr msg)
+    {
+        voxels(static_cast<double>(msg->data));
     }
 
     // ---------------- Voxel grid ----------------

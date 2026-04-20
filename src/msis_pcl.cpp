@@ -9,6 +9,7 @@
 #include <ping360_msgs/msg/sonar_echo.hpp>
 #include <mvp_msgs/msg/float64_stamped.hpp>
 #include <std_msgs/msg/header.hpp>
+#include <std_msgs/msg/float32.hpp>
 
 #include <cmath>
 #include <algorithm>
@@ -18,6 +19,7 @@ class MSIS_PCL : public rclcpp::Node
   image_transport::Subscriber image_sub_;
   rclcpp::Subscription<ping360_msgs::msg::SonarEcho>::SharedPtr echo_sub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_pcl_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr pub_angle_;
   
   //Sensor Info
   bool stonefish_enabled;
@@ -71,6 +73,7 @@ public:
       this->get_parameter("stonefish.pub_topic", pub_topic);
       // rmw_qos_profile_t custom_qos = rmw_qos_profile_default;
       pub_pcl_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(pub_topic, 10);
+      pub_angle_ = this->create_publisher<std_msgs::msg::Float32>(pub_topic + "/current_angle", 10);
       image_sub_ = image_transport::create_subscription(this, sub_topic,
         std::bind(&MSIS_PCL::imageCb, this, std::placeholders::_1), "raw");
 
@@ -247,6 +250,10 @@ public:
     }
 
     this->pub_pcl_->publish(pcl_msg);
+
+    std_msgs::msg::Float32 angle_msg;
+    angle_msg.data = this->angle * 2*M_PI / 400.0 - M_PI;
+    this->pub_angle_->publish(angle_msg);
   }
 
   //Linspace function
