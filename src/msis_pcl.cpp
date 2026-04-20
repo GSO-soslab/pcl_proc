@@ -40,9 +40,9 @@ class MSIS_PCL : public rclcpp::Node
   cv::Mat current;
   cv::Mat current_gray;
   cv::Mat diff;
-  std::vector<uchar> middle_intense;
   std::vector<uchar> intensities;
   float angle;
+  rclcpp::Time last_stamp;
   
 public:
   //Constructor
@@ -170,17 +170,15 @@ public:
     }
 
     this->current = cv_ptr->image;
-    //Get current measurement
     cv::absdiff(this->prev, this->current, this->diff);
-
-    cv::cvtColor(this->diff, this->diff, CV_BGR2GRAY);
+    cv::cvtColor(this->diff, this->diff, cv::COLOR_BGR2GRAY);
     this->prev = this->current;
-    
-    cv::cvtColor(this->current, this->current_gray,CV_BGR2GRAY);
-    cv::Size s=this->diff.size();
+
+    cv::cvtColor(this->current, this->current_gray, cv::COLOR_BGR2GRAY);
+    cv::Size s = this->current_gray.size();
     this->height = s.height;
     this->width  = s.width;
-    
+
     this->generate_pointclouds();
     
   }
@@ -202,9 +200,9 @@ public:
     pcl_msg.header = std_msgs::msg::Header();
     pcl_msg.header.frame_id = this->frame_id;
 
+    // pcl_msg.header.stamp = this->last_stamp;
     pcl_msg.height = 1;
-    //No. of bins equal to the image height equal to the number of points
-    pcl_msg.width = this->height;
+    pcl_msg.width = this->number_of_bins;
     pcl_msg.is_dense = true;
 
     //Total number of bytes per point
@@ -212,41 +210,42 @@ public:
     pcl_msg.row_step = pcl_msg.point_step * pcl_msg.width;
     pcl_msg.data.resize(pcl_msg.width * pcl_msg.point_step);
 
-    //x positions.
+    //x positions (range bins)
     std::vector<float> x = this->linspace(this->range_min, this->range_max, this->number_of_bins);
-    //Iterators for PointCloud msg
+
+    // Detect active beam angle from frame difference middle row
+    std::vector<uchar> middle_intense = this->getMiddleRowPixelValues(this->diff);
+
+    // If no change detected (beam hasn't moved), skip this frame
+    if (std::all_of(middle_intense.begin(), middle_intense.end(), [](uchar v){ return v == 0; })) {
+      return;
+    }
+
+    for (int a = 0; a < (int)middle_intense.size(); a++) {
+      if (middle_intense[a] != 0) {
+        this->angle = a;
+        break;
+      }
+    }
+
+    this->cos_angle_radians = std::cos(this->angle * 2*M_PI / 400.0 - M_PI);
+    this->sin_angle_radians = std::sin(this->angle * 2*M_PI / 400.0 - M_PI);
+    this->intensities = this->getColumnPixelValues(this->current_gray, this->angle);
+
     sensor_msgs::PointCloud2Iterator<float> iterX(pcl_msg, "x");
     sensor_msgs::PointCloud2Iterator<float> iterY(pcl_msg, "y");
     sensor_msgs::PointCloud2Iterator<float> iterZ(pcl_msg, "z");
     sensor_msgs::PointCloud2Iterator<float> iterIntensity(pcl_msg, "intensity");
 
-    //Get the middle values
-    this->middle_intense = this->getMiddleRowPixelValues(this->diff);
-    for (int angle=0; angle < this->middle_intense.size();angle ++){
-      //Get current angle measurement
-      if (this->middle_intense[angle] != 0){
-        this->angle = angle;
-        this->cos_angle_radians = std::cos((this->angle* 2*M_PI / 400.0 - M_PI));
-        this->sin_angle_radians = std::sin((this->angle* 2*M_PI / 400.0 - M_PI));
-        // std::cout<<this->angle* 2*M_PI / 400.0 - M_PI<<std::endl;
-        for (size_t i = 0; i < pcl_msg.width; ++i) {
-          *iterX = x[i] * this->cos_angle_radians;
-          *iterY = x[i] * this->sin_angle_radians;
-          *iterZ = 0;
-
-          this->intensities = this->getColumnPixelValues(this->current_gray, this->angle);
-
-          *iterIntensity = static_cast<uchar>(this->intensities[i]);
-
-          // printVector(this->intensities);
-
-          // // Increment the iterators
-          ++iterX;
-          ++iterY;
-          ++iterZ;
-          ++iterIntensity;
-        }
-      }
+    for (size_t i = 0; i < pcl_msg.width; ++i) {
+      *iterX = x[i] * this->cos_angle_radians;
+      *iterY = x[i] * this->sin_angle_radians;
+      *iterZ = 0;
+      *iterIntensity = static_cast<float>(this->intensities[i]);
+      ++iterX;
+      ++iterY;
+      ++iterZ;
+      ++iterIntensity;
     }
 
     this->pub_pcl_->publish(pcl_msg);
@@ -307,7 +306,7 @@ public:
     pixelValues.reserve(image.rows);
 
     // Iterate over each row in the column and retrieve the pixel value
-    for (int rowIndex = image.rows; rowIndex > 0; --rowIndex) {
+    for (int rowIndex = image.rows - 1; rowIndex >= 0; --rowIndex) {
         uchar pixelValue = image.at<uchar>(rowIndex, columnIndex);
         pixelValues.push_back(pixelValue);
     }
