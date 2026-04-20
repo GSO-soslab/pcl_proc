@@ -6,6 +6,7 @@
 #tony.jacob@uri.edu
 
 #ros2 bag record /alpha_rise/path/state /alpha_rise/path/distance_to_obstacle /alpha_rise/odometry/filtered/local /alpha_rise/path /alpha_rise/fls/pointcloud
+from nav_msgs import msg
 import rclpy
 from rclpy.parameter import Parameter
 from rclpy.node import Node
@@ -287,39 +288,19 @@ class Wp_Admin(Node):
         # If same path, then no new path is then published.
         if len(msg.poses) == self.n_points:
 
-            # Get terminal poses
-            start_pose = msg.poses[0]
-            end_pose   = msg.poses[-1]
+            self.farthest_sector_pose = None
+            max_x = float('-inf')
+            for pose_stamped in msg.poses:
+                bl_pt = self.pose_in_base_link(pose_stamped)
+                direction = math.degrees(math.atan2(bl_pt.point.y, bl_pt.point.x))
+                if -10 < direction < 45 and bl_pt.point.x > max_x:
+                    max_x = bl_pt.point.x
+                    self.farthest_sector_pose = pose_stamped
+                  
+            valid_farthest_point = self.farthest_sector_pose is not None
 
-            # Distances to best_point position
-            dx_start = start_pose.pose.position.x - self.x
-            dy_start = start_pose.pose.position.y - self.y
-            dist_start = math.hypot(dx_start, dy_start)
-
-            dx_end = end_pose.pose.position.x - self.x
-            dy_end = end_pose.pose.position.y - self.y
-            dist_end = math.hypot(dx_end, dy_end)
-
-            # Select closest terminal point
-            if dist_start <= dist_end:
-                self.closest_terminal_pose = start_pose
-            else:
-                self.closest_terminal_pose = end_pose
-            
-            vx = round(self.base_to_odom_tf.transform.translation.x)
-            vy = round(self.base_to_odom_tf.transform.translation.y)
-            if math.hypot(round(vx-self.closest_terminal_pose.pose.position.x), round(vy-self.closest_terminal_pose.pose.position.y)) > 10.0:
-                valid_closest_point = True
-            else:
-                valid_closest_point = False
-                
-            if valid_closest_point and self.valid_best_point:
-                self.valid_point = True
-            else:
-                self.valid_point = False
-                
             if self.state == "survey":
-                if self.valid_point:
+                if self.valid_best_point:
 
                     self.search_mode_timer = time.time()
                     #grab time of follow_mode initializing
@@ -348,16 +329,17 @@ class Wp_Admin(Node):
                         wpt.wpt = best_point
                         wpts.wpt.append(wpt)
                         # wp.polygon.points.append(best_point)
-
-                        wpt = Waypoint()
-                        wpt.header = msg.header
-                        wpt.u = self.follow_mode_surge
-                        best_point = Point()    
-                        best_point.x = self.closest_terminal_pose.pose.position.x
-                        best_point.y = self.closest_terminal_pose.pose.position.y
-                        best_point.z = self.depth
-                        wpt.wpt = best_point
-                        wpts.wpt.append(wpt)
+                        
+                        if valid_farthest_point:
+                            wpt = Waypoint()
+                            wpt.header = msg.header
+                            wpt.u = self.follow_mode_surge
+                            best_point = Point()
+                            best_point.x = self.farthest_sector_pose.pose.position.x
+                            best_point.y = self.farthest_sector_pose.pose.position.y
+                            best_point.z = self.depth
+                            wpt.wpt = best_point
+                            wpts.wpt.append(wpt)
                         self.pub_update.publish(wpts)
 
                         # self.poses = msg.poses            
@@ -368,11 +350,13 @@ class Wp_Admin(Node):
                         self.exit_mode(wpts, info = f"Mission completed. Timeout of {self.follow_mode_timer_param}s.")
                     # else:
                     #     self.iceberg_reacquisition_mode(wpts)
-            #Iceberg Reacquisition Mode is when 
+                else:
+                    return
+            #Iceberg Reacquisition Mode is when
             #the vehicle reaches end of a valid path.
-            elif self.state == "start":     
-                self.iceberg_reacquisition_mode(wpts)
-        
+            elif self.state == "start":
+                self.iceberg_reacquisition_mode(wpts, msg)
+
         #Path is still published when no costmap. But the n_points is 1 (vx_x, vx_y)
         #We use that parameter to create a new bhvr mode.
         else:
@@ -393,7 +377,16 @@ class Wp_Admin(Node):
                     self.get_logger().warn("Search Mode Took too long --shutting down")
                     self.destroy_node()
                     rclpy.shutdown()
-            
+
+
+        # Find farthest path point in base_link that lies within the sector
+    def pose_in_base_link(self, pose_stamped):
+        pt = PointStamped()
+        pt.header = self.header
+        pt.point = pose_stamped.pose.position
+        return tf2_geometry_msgs.do_transform_point(pt, self.odom_to_base_tf)   
+    
+         
     def exit_mode(self, wpts, info):
         """
         Function to navigate the vehicle 
@@ -522,7 +515,7 @@ class Wp_Admin(Node):
         self.get_logger().info("Search Mode", throttle_duration_sec = 3)
         self.state = "survey"
 
-    def iceberg_reacquisition_mode(self, wpts):
+    def iceberg_reacquisition_mode(self, wpts, path_msg):
         """
         Function to navigate the vehicle
         so as to reacquire acoustic contact

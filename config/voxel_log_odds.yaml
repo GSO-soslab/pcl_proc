@@ -48,7 +48,7 @@
       depth_deviation: 7.0
 
       # Hard upper-bound on Z (m): voxels above this value are always discarded
-      z_cutoff: 0.0
+      z_cutoff: -1.0
 
       # --- Decay ---
       # Seconds a voxel survives without a new measurement before reverting to 0.5 probability.
