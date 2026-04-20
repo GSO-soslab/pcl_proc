@@ -6,7 +6,6 @@
 #tony.jacob@uri.edu
 
 #ros2 bag record /alpha_rise/path/state /alpha_rise/path/distance_to_obstacle /alpha_rise/odometry/filtered/local /alpha_rise/path /alpha_rise/fls/pointcloud
-from nav_msgs import msg
 import rclpy
 from rclpy.parameter import Parameter
 from rclpy.node import Node
@@ -227,31 +226,31 @@ class Wp_Admin(Node):
             response = future.result()
             n_wpt = len(response.wpt)
             msg = Int16()
-            # 2 is the len(response.wpt) when in following.
-            if n_wpt == 2:
+            # n_wpt <= 3: 1 pre-existing helm wpt + 1 or 2 published wpts (best_point [+ farthest])
+            if n_wpt <= 3:
+                # Vehicle is navigating away from iceberg after timeout
                 if self.bool_exit_mode:
-                    # print(self.distance_to_obstacle,"exit_mode",time.time())
-                    msg.data=2
+                    msg.data = 2   # exit mode
                     self.pub_state.publish(msg)
                 else:
-                    # print(self.distance_to_obstacle,"Following",time.time())
-                    msg.data=0
+                    # Actively following iceberg: best_point + optional farthest sector point
+                    msg.data = 0   # following
                     self.pub_state.publish(msg)
-            #Search Mode
+            # n_wpt > 3: 1 pre-existing + 8 arc/circle points (search or reacquisition arc)
             else:
+                # Vehicle is executing a concentric circle search pattern
                 if self.bool_search_mode:
-                    # print(self.distance_to_obstacle, "search",time.time())
-                    msg.data = -1
+                    msg.data = -1  # search
                     self.pub_state.publish(msg)
-                #Iceberg Reaaq
+                # Vehicle is executing a reacquisition arc after losing the iceberg
                 else:
                     if self.mission_command != "EMPTY":
-                    # print(self.distance_to_obstacle,"reacq",time.time())
-                        msg.data = 1
+                        msg.data = 1   # reacquisition
                         self.pub_state.publish(msg)
                     else:
-                        msg.data = -2
-                        self.pub_state.publish(msg) 
+                        # Mission not started yet
+                        msg.data = -2  # idle
+                        self.pub_state.publish(msg)
 
     def path_cB(self, msg):
         """
@@ -355,7 +354,7 @@ class Wp_Admin(Node):
             #Iceberg Reacquisition Mode is when
             #the vehicle reaches end of a valid path.
             elif self.state == "start":
-                self.iceberg_reacquisition_mode(wpts, msg)
+                self.iceberg_reacquisition_mode(wpts)
 
         #Path is still published when no costmap. But the n_points is 1 (vx_x, vx_y)
         #We use that parameter to create a new bhvr mode.
@@ -515,19 +514,19 @@ class Wp_Admin(Node):
         self.get_logger().info("Search Mode", throttle_duration_sec = 3)
         self.state = "survey"
 
-    def iceberg_reacquisition_mode(self, wpts, path_msg):
+    def iceberg_reacquisition_mode(self, wpts):
         """
         Function to navigate the vehicle
         so as to reacquire acoustic contact
         """
-        if self.state == "start":
-            self._reacquisition_active = True
 
-            request = ChangeState.Request()
-            request.state = "survey"
-            request.caller = self.node_name
-            future = self.change_state_service_client.call_async(request)
-            future.add_done_callback(self.get_state_callback)
+        self._reacquisition_active = True
+
+        request = ChangeState.Request()
+        request.state = "survey"
+        request.caller = self.node_name
+        future = self.change_state_service_client.call_async(request)
+        future.add_done_callback(self.get_state_callback)
 
         point_of_obstacle = [self.reacquisition_s_param * self.standoff_distance_in_meters,
                              -self.standoff_distance_in_meters]
