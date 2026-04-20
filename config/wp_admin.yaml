@@ -14,19 +14,18 @@
     follow_mode_timer: 3000 #sec
     
     # Navigation
-    fls_beamwidth: 35 #degrees 
     path_topic: "/alpha_rise/path"
     
-    search_mode_initial_radius: 10.0 #m
+    search_mode_initial_radius: 20.0 #m
     search_mode_max_circles: 2
     search_mode_depth: -15.0 #m
-    search_mode_surge: 0.3 #m/s
+    search_mode_surge: 0.7 #m/s
 
     exit_mode_surge: 0.8 #m/s
     exit_mode_distance: 20.0 #m
 
-    reacquisition_s_param: 0.5
-    reacquisition_surge: 0.3 #m/s
+    reacquisition_s_param: 1.0
+    reacquisition_surge: 0.5 #m/s
 
     stand_off_distance: 25.0
     n_points: 20

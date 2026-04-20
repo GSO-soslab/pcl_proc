@@ -529,7 +529,6 @@ class Wp_Admin(Node):
         """
         if self.state == "start":
             self._reacquisition_active = True
-            self._reacquisition_timer = self.create_timer(5.0, self._reacquisition_hold_done)
 
             request = ChangeState.Request()
             request.state = "survey"
@@ -557,6 +556,7 @@ class Wp_Admin(Node):
 
         self.get_logger().info("Iceberg Reacquisition Mode", throttle_duration_sec=3)
         self.pub_update.publish(wpts)
+        self._reacquisition_timer = self.create_timer(5.0, self._reacquisition_hold_done)
 
     def _reacquisition_hold_done(self):
         self._reacquisition_active = False
