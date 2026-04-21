@@ -6,7 +6,6 @@
     costmap_method: 'custom' #nav2 or custom
     path_topic: 'path'
     debug: false
-    sim: true
     enable_search_mode: true
     msis_vertical_beamwidth: 25 #degree
     canny_min_threshold: 200

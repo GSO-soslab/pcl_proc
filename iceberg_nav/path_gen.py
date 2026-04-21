@@ -169,10 +169,18 @@ class PathGen(Node):
             data = cv2.bitwise_not(data)
 
         num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(data, connectivity=8)
-        data = np.zeros_like(data)
-        for label in range(1, num_labels):
-            if stats[label, cv2.CC_STAT_AREA] >= 10:
-                data[labels == label] = 255
+        if num_labels <= 1: # if there are any connected components other than the background
+            data = np.zeros_like(data)
+        else:
+            areas = stats[1:, cv2.CC_STAT_AREA]
+            # Take biggest 3 areas, add 1 to skip background
+            top3_labels = np.argsort(areas)[::-1][:3] + 1      
+            data = np.zeros_like(data)
+            # 0 is the background, so we start from 1 to ignore it
+            for label in top3_labels:
+                # if area is bigger than 10, we max it and use it.
+                if stats[label, cv2.CC_STAT_AREA] >= 15:
+                    data[labels == label] = 255
         costmap_image_ros = self.bridge.cv2_to_imgmsg(data)
         costmap_image_ros.header.stamp = self.time
         costmap_image_ros.header.frame_id = self.odom_frame
