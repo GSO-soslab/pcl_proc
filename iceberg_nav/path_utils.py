@@ -26,11 +26,11 @@ def compare_two_lists(list1:list, list2:list, height:int, width:int):
     # Iterate through the list of coordinates and draw circles
     
     for coordinates in list1:
-        center = tuple(coordinates)
+        center = (int(coordinates[0]), int(coordinates[1]))
         cv2.circle(image, center, 1, 100)
 
     for coordinates in list2:
-        center = tuple(coordinates)
+        center = (int(coordinates[0]), int(coordinates[1]))
         cv2.circle(image, center, 1, 255)
     
     #plot center
@@ -49,8 +49,8 @@ def compare_points_with_image(frame:np.array, points_list:list):
         frame: Image Array with points_list vizualised
     """
     for index, coordinates in enumerate(points_list):
-        center = tuple(coordinates)
-        
+        center = (int(coordinates[0]), int(coordinates[1]))
+
         if index == 0:
             cv2.circle(frame, center, 1, 255, 1)
         else:

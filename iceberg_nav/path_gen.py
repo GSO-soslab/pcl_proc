@@ -46,6 +46,8 @@ class PathGen(Node):
         self.declare_parameter('distance_constraint', Parameter.Type.DOUBLE)
         self.declare_parameter('surge_velocity',Parameter.Type.DOUBLE)
         self.declare_parameter('max_yaw_rate',Parameter.Type.DOUBLE)
+        self.declare_parameter('edge_frame_id', Parameter.Type.STRING)
+        self.declare_parameter('line_frame_id', Parameter.Type.STRING)
 
         # Get parameters
         self.odom_frame = self.get_parameter('odom_frame').get_parameter_value().string_value
@@ -65,6 +67,8 @@ class PathGen(Node):
         self.distance_constraint = self.get_parameter('distance_constraint').get_parameter_value().double_value
         self.max_surge = self.get_parameter('surge_velocity').get_parameter_value().double_value
         self.max_yaw_rate = self.get_parameter('max_yaw_rate').get_parameter_value().double_value
+        self.edge_frame_id = self.get_parameter('edge_frame_id').get_parameter_value().string_value
+        self.line_frame_id = self.get_parameter('line_frame_id').get_parameter_value().string_value
 
         if enable_search_mode:
             self.minimum_depth_for_path = -(math.tan(math.radians(msis_vertical_beamwidth / 2)) * self.distance_in_meters)
@@ -302,7 +306,7 @@ class PathGen(Node):
                     polar_dict[theta] = (r, theta)
             polar_coordinates = list(polar_dict.values())
             # Step 4: Convert to Cartesian. (x, y)
-            cartesian_coordinates = [[round(r * np.cos(theta)), round(r * np.sin(theta))] for r, theta in polar_coordinates]
+            cartesian_coordinates = [[r * np.cos(theta), r * np.sin(theta)] for r, theta in polar_coordinates]
             """
             ------>x COSTMAP IMAGE
             |
@@ -310,7 +314,7 @@ class PathGen(Node):
             |      |
             |      |
             |  y<--- VEHICLE IMAGE FRAME
-            |   
+            |
             yV
             """
             cartesian_coordinates = [(-y,-x) for x, y in cartesian_coordinates]
@@ -325,7 +329,7 @@ class PathGen(Node):
             """
 
             # Step 5: Shift back
-            cartesian_coordinates = [[int(x+self.width//2),int(self.height//2 - y),] for x, y in cartesian_coordinates]
+            cartesian_coordinates = [[x+self.width//2, self.height//2 - y] for x, y in cartesian_coordinates]
             """ 
             ------>xCOSTMAP IMAGE
             |
@@ -366,7 +370,7 @@ class PathGen(Node):
                 
 
             # Convert to Cartesian.
-            cartesian_coordinates = [[round(r * np.cos(theta)), round(r * np.sin(theta))] for r, theta in yawd_p]
+            cartesian_coordinates = [[r * np.cos(theta), r * np.sin(theta)] for r, theta in yawd_p]
             """
             ------>x COSTMAP IMAGE
             |
@@ -374,7 +378,7 @@ class PathGen(Node):
             |      |
             |      |
             |  y<--- VEHICLE FRAME
-            |   
+            |
             yV
             """
             cartesian_coordinates = [(-y,-x) for x, y in cartesian_coordinates]
@@ -388,7 +392,7 @@ class PathGen(Node):
             yV
             """
             # Shift back to Image frame
-            cartesian_coordinates = [[int(x+self.width//2),int(self.height//2 - y)] for x, y in cartesian_coordinates]
+            cartesian_coordinates = [[x+self.width//2, self.height//2 - y] for x, y in cartesian_coordinates]
 
             # Discard points to the left of the vehicle (x < image center)
             cartesian_coordinates = [pt for pt in cartesian_coordinates if pt[0] >= self.width//2]
@@ -405,7 +409,7 @@ class PathGen(Node):
             # Iterate through the
             #  list of coordinates and draw circles
             for coordinates in cartesian_coordinates:
-                center = tuple(coordinates)
+                center = (int(coordinates[0]), int(coordinates[1]))
                 cv2.circle(image, center, radius, color, 1)
 
             # image = cv2.line(image, (0, 3*self.width//4), (200, 3*self.width//4), 100, 1)
@@ -493,18 +497,12 @@ class PathGen(Node):
                     lin_regress_debug = [((self.slope) * x ) for x in x_edge_frame_list]
 
                     for cords in zip(x_edge_frame_list,y_edge_frame_list ):
-                        cords = list(cords)
-                        cords[0] = cords[0]+self.width//2
-                        cords[1] = cords[1]+self.height//2
-                        center = tuple(cords)
+                        center = (int(cords[0]+self.width//2), int(cords[1]+self.height//2))
                         cv2.circle(edge_frame_debug, center, 1, (255,255,255), 1)
-                    
+
                     #draw best fit line
                     for cords in zip(x_edge_frame_list, lin_regress_debug):
-                        cords = list(cords)
-                        cords[0] = cords[0]+self.width//2
-                        cords[1] = round(cords[1]+self.height//2)
-                        center = tuple(cords)
+                        center = (int(cords[0]+self.width//2), int(cords[1]+self.height//2))
                         cv2.circle(edge_frame_debug, center, 1, (0,0,255), 1)
 
                     #Draw origin of Edge Frame
@@ -576,7 +574,7 @@ class PathGen(Node):
                 
                 ##LINE FRAME->EDGE_FRAME
                 lingres  = [[x, y] for x, y in zip(x_model, y_model)]
-                #Cost 
+                #Cost
                 best_point = self.get_best_point(lingres)
 
                 x_edge_frame_list, y_edge_frame_list = path_utils.rotate_points(lingres, -self.angle_from_e_to_l)
@@ -595,10 +593,10 @@ class PathGen(Node):
                 for coords in edge_frame:
                     shifted_x = coords[0] + self.new_origin[0]
                     shifted_y = coords[1] + self.new_origin[1]
-                    vx_frame_model.append([round(shifted_x), round(shifted_y)])
+                    vx_frame_model.append([shifted_x, shifted_y])
 
-                self.best_point = [round(x[0] + self.new_origin[0]), 
-                                   round(y[0] + self.new_origin[1])]
+                self.best_point = [x[0] + self.new_origin[0],
+                                   y[0] + self.new_origin[1]]
                 
                 
                 """        
@@ -675,9 +673,9 @@ class PathGen(Node):
                 self.new_origin[1] = self.new_origin[1] + np.float64(vx_theta)
 
                 # Convert to Cartesian (x,y)
-                cartesian_coordinates = [[round(r * np.cos(theta)), round(r * np.sin(theta))] for r, theta in polar_coordinates]
-                self.best_point = [round(self.best_point[0] * np.cos(self.best_point[1])),round(self.best_point[0] * np.sin(self.best_point[1]))]
-                self.new_origin = [round(self.new_origin[0] * np.cos(self.new_origin[1])),round(self.new_origin[0] * np.sin(self.new_origin[1]))]
+                cartesian_coordinates = [[r * np.cos(theta), r * np.sin(theta)] for r, theta in polar_coordinates]
+                self.best_point = [self.best_point[0] * np.cos(self.best_point[1]), self.best_point[0] * np.sin(self.best_point[1])]
+                self.new_origin = [self.new_origin[0] * np.cos(self.new_origin[1]), self.new_origin[0] * np.sin(self.new_origin[1])]
                 
                 """
                 ------>x COSTMAP IMAGE
@@ -703,9 +701,9 @@ class PathGen(Node):
                 yV
                 """
                 # Shift back to Image frame
-                cartesian_coordinates = [[int(x+self.width//2),int(self.height//2 - y)] for x, y in cartesian_coordinates]
-                self.best_point = [int(self.best_point[0] + self.width//2), int(self.height//2 - self.best_point[1])]
-                self.new_origin = [int(self.new_origin[0] + self.width//2), int(self.height//2 - self.new_origin[1])]
+                cartesian_coordinates = [[x+self.width//2, self.height//2 - y] for x, y in cartesian_coordinates]
+                self.best_point = [self.best_point[0] + self.width//2, self.height//2 - self.best_point[1]]
+                self.new_origin = [self.new_origin[0] + self.width//2, self.height//2 - self.new_origin[1]]
 
                 """        
                 ------>xCOSTMAP IMAGE
@@ -788,8 +786,8 @@ class PathGen(Node):
                     # Broadcast Odom-> Edge Frame TF
                     odom_costmap_tf = TransformStamped()
                     odom_costmap_tf.header.stamp = self.time
-                    odom_costmap_tf.header.frame_id = 'alpha_rise/odom'
-                    odom_costmap_tf.child_frame_id = 'alpha_rise/costmap/edge_frame'
+                    odom_costmap_tf.header.frame_id = self.odom_frame
+                    odom_costmap_tf.child_frame_id = self.edge_frame_id
                     odom_costmap_tf.transform.translation.x = self.new_origin[0]
                     odom_costmap_tf.transform.translation.y = self.new_origin[1]
                     odom_costmap_tf.transform.translation.z = np.float64(0)
@@ -803,8 +801,8 @@ class PathGen(Node):
                     # Broadcast Edge Frame-> Line Frame TF
                     odom_costmap_tf = TransformStamped()
                     odom_costmap_tf.header.stamp = self.time
-                    odom_costmap_tf.header.frame_id = 'alpha_rise/costmap/edge_frame'
-                    odom_costmap_tf.child_frame_id = 'alpha_rise/costmap/line_frame'
+                    odom_costmap_tf.header.frame_id = self.edge_frame_id
+                    odom_costmap_tf.child_frame_id = self.line_frame_id
                     odom_costmap_tf.transform.translation.x = np.float64(0)
                     odom_costmap_tf.transform.translation.y = np.float64(0)
                     odom_costmap_tf.transform.translation.z = np.float64(0)
@@ -827,7 +825,7 @@ class PathGen(Node):
                 pose_stamped.header.frame_id = self.frame#
                 pose_stamped.header.stamp = self.time
                 pose_stamped.pose.position.x = self.vx_x  #self.height//4 - cords[1] * self.resolution
-                pose_stamped.pose.position.y = self.vx_y #self.height//4 - cords[0] * self.resolution 
+                pose_stamped.pose.position.y = self.vx_y #self.height//4 - cords[0] * self.resolution
                 pose_stamped.pose.orientation.x = np.float64(0)
                 pose_stamped.pose.orientation.y = np.float64(0)
                 pose_stamped.pose.orientation.z = np.float64(0)
@@ -843,14 +841,14 @@ class PathGen(Node):
             pose_stamped.header.frame_id = self.frame#
             pose_stamped.header.stamp = self.time
             pose_stamped.pose.position.x = self.vx_x  #self.height//4 - cords[1] * self.resolution
-            pose_stamped.pose.position.y = self.vx_y #self.height//4 - cords[0] * self.resolution 
+            pose_stamped.pose.position.y = self.vx_y #self.height//4 - cords[0] * self.resolution
             pose_stamped.pose.orientation.x = np.float64(0)
             pose_stamped.pose.orientation.y = np.float64(0)
             pose_stamped.pose.orientation.z = np.float64(0)
             pose_stamped.pose.orientation.w = np.float64(1)
             path.poses.append(pose_stamped)
             self.pub_path.publish(path)
-    
+
     def get_distance_to_obstacle(self, vx_image:np.array):
         """
         Get distance to the obstacle from the vehicle.
