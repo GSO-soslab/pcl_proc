@@ -8,6 +8,8 @@
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <unordered_map>
+#include <atomic>
+#include <mutex>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
@@ -100,21 +102,33 @@ public:
         this->declare_parameter<std::string>("output_pcd_file", "occupancy_grid.pcd");
         this->get_parameter("output_pcd_file", output_pcd_file_);
 
+        this->declare_parameter<double>("map_publish_rate", 5.0);
+        this->get_parameter("map_publish_rate", map_publish_rate_);
+
         n_voxels_ = static_cast<int>(std::ceil(global_costmap_dim_ / voxel_res_));
         half_grid_ = global_costmap_dim_ / 2.0;
     }
 
     void setupROS() {
+        sensor_cb_group_  = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+        decay_cb_group_   = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+        publish_cb_group_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
+        rclcpp::SubscriptionOptions sensor_opts;
+        sensor_opts.callback_group = sensor_cb_group_;
+
         for (const auto& topic : sub_pointcloud_topics_) {
             pc_subs_.push_back(this->create_subscription<sensor_msgs::msg::PointCloud2>(
                 topic, 10,
-                std::bind(&VoxelLogOddsVisualizer::pcCallback, this, std::placeholders::_1)
+                std::bind(&VoxelLogOddsVisualizer::pcCallback, this, std::placeholders::_1),
+                sensor_opts
             ));
         }
 
         odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
             sub_odometry_topic_, 10,
-            std::bind(&VoxelLogOddsVisualizer::odometryCallback, this, std::placeholders::_1)
+            std::bind(&VoxelLogOddsVisualizer::odometryCallback, this, std::placeholders::_1),
+            sensor_opts
         );
 
         prob_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
@@ -129,9 +143,16 @@ public:
 
         if (decay_time_ > 0.0) {
             decay_timer_ = this->create_wall_timer(1s,
-                std::bind(&VoxelLogOddsVisualizer::decayCallback, this));
+                std::bind(&VoxelLogOddsVisualizer::decayCallback, this),
+                decay_cb_group_);
             RCLCPP_INFO(this->get_logger(), "Voxel decay enabled: %.1f s", decay_time_);
         }
+
+        auto publish_ms = std::chrono::milliseconds(static_cast<int>(1000.0 / map_publish_rate_));
+        publish_timer_ = this->create_wall_timer(
+            publish_ms,
+            std::bind(&VoxelLogOddsVisualizer::publishAll, this),
+            publish_cb_group_);
 
         RCLCPP_INFO(this->get_logger(), "VoxelLogOddsVisualizer initialized. Grid size: %.2fm, resolution: %.2fm",
                     global_costmap_dim_, voxel_res_);
@@ -170,8 +191,9 @@ private:
     double local_costmap_dim_;    // meters
     double depth_deviation_;
     double z_cutoff_;
-    double vehicle_z_{0.0};
+    std::atomic<double> vehicle_z_{0.0};
     double decay_time_{-1.0};     // seconds a voxel survives without a new hit; -1 = disabled
+    double map_publish_rate_{5.0};
 
     // --- PCD export ---
     bool save_pcd_;
@@ -183,6 +205,13 @@ private:
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr global_ogm_pub_;
     rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr local_ogm_pub_;
     rclcpp::TimerBase::SharedPtr decay_timer_;
+    rclcpp::TimerBase::SharedPtr publish_timer_;
+
+    rclcpp::CallbackGroup::SharedPtr sensor_cb_group_;
+    rclcpp::CallbackGroup::SharedPtr decay_cb_group_;
+    rclcpp::CallbackGroup::SharedPtr publish_cb_group_;
+
+    std::mutex map_mutex_;
 
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -258,7 +287,7 @@ private:
     }
 
     void odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg) {
-        vehicle_z_ = msg->pose.pose.position.z;
+        vehicle_z_.store(msg->pose.pose.position.z);
     }
 
     void pcCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
@@ -293,6 +322,7 @@ private:
         // Transform points to map frame using TF
         Eigen::Matrix4f T = transformToMatrix(trans);
 
+        std::lock_guard<std::mutex> lock(map_mutex_);
         for (size_t i = 0; i < points.size(); i++) {
             Eigen::Vector4f p_map = T * points[i];
             
@@ -326,12 +356,16 @@ private:
 
         }
 
+    }
+
+    void publishAll() {
         publishVoxelMap();
         publishGlobalCostmap();
         publishLocalCostmap();
     }
 
     void publishVoxelMap() {
+        std::lock_guard<std::mutex> lock(map_mutex_);
         // Count valid voxels
         size_t num_voxels = 0;
         for (const auto& kv : logodds_grid_) {
@@ -400,8 +434,9 @@ private:
 
     // Helper: compute depth band bounds
     std::pair<double,double> depthBand() const {
-        return {vehicle_z_ - depth_deviation_,
-                std::min(vehicle_z_ + depth_deviation_, z_cutoff_)};
+        const double vz = vehicle_z_.load();
+        return {vz - depth_deviation_,
+                std::min(vz + depth_deviation_, z_cutoff_)};
     }
 
     // Helper: check z filtering for a voxel
@@ -411,6 +446,7 @@ private:
     }
 
     void publishGlobalCostmap() {
+        std::lock_guard<std::mutex> lock(map_mutex_);
         const int cells = static_cast<int>(std::ceil(global_costmap_dim_ / voxel_res_));
         const double half = global_costmap_dim_ / 2.0;
 
@@ -448,6 +484,7 @@ private:
     }
 
     void publishLocalCostmap() {
+        std::lock_guard<std::mutex> lock(map_mutex_);
         const int cells = static_cast<int>(std::ceil(local_costmap_dim_ / voxel_res_));
         const double half = local_costmap_dim_ / 2.0;
 
@@ -502,6 +539,7 @@ private:
     }
 
     void decayCallback() {
+        std::lock_guard<std::mutex> lock(map_mutex_);
         const rclcpp::Time now = this->get_clock()->now();
         const rclcpp::Duration threshold = rclcpp::Duration::from_seconds(decay_time_);
 
@@ -535,7 +573,9 @@ private:
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<VoxelLogOddsVisualizer>();
-    rclcpp::spin(node);
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(node);
+    executor.spin();
     rclcpp::shutdown();
     return 0;
 }

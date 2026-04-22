@@ -53,7 +53,11 @@
       # --- Decay ---
       # Seconds a voxel survives without a new measurement before reverting to 0.5 probability.
       # Set to -1 to disable decay (voxels accumulate indefinitely). This is in seconds
-      decay_time: 300.0
+      decay_time: 180.0
+
+      # --- Publish rate ---
+      # Rate (Hz) at which the voxel map and costmaps are published
+      map_publish_rate: 5.0
 
       # --- PCD export ---
       save_pcd: false
