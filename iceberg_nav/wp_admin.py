@@ -345,8 +345,9 @@ class Wp_Admin(Node):
                     #Chart a course away from the iceberg when timer runs out.
                     #Go to a point 90 degree port side of Vx
                     else:
-                        self.get_logger().info(f"Exit sequence. Timer ran out at {self.follow_mode_timer_param}s")
-                        self.exit_mode(wpts, info = f"Mission completed. Timeout of {self.follow_mode_timer_param}s.")
+                        if not self.bool_exit_mode:
+                            self.get_logger().info(f"Exit sequence. Timer ran out at {self.follow_mode_timer_param}s")
+                            self.exit_mode(wpts, info = f"Mission completed. Timeout of {self.follow_mode_timer_param}s.")
                     # else:
                     #     self.iceberg_reacquisition_mode(wpts)
                 else:
