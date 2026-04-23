@@ -1,7 +1,7 @@
 /**:
   ros__parameters:
     # common (msis_voxel_node + msis_prob_clouds)
-    sim: true
+    stonefish: true
     cloud_sub_topic: "/alpha_rise/stonefish/msis/data/pointcloud"
     sensor_frame_id: "alpha_rise/ping360_link_sf"
     vertical_fov_deg: 25.0
@@ -23,4 +23,3 @@
     min_range: 5.0
     z_max: -1.0
     fan_pub_topic: /alpha_rise/msis/pointcloud/probability
-    range_filter_pub_topic: /alpha_rise/msis/intensity_range/range_filter

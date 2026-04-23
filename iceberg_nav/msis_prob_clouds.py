@@ -6,7 +6,6 @@ from rclpy.parameter import Parameter
 import numpy as np
 from visualization_msgs.msg import Marker
 from sensor_msgs.msg import PointCloud2, PointField
-from std_msgs.msg import Float32MultiArray
 from scipy.spatial import cKDTree
 import tf2_ros
 from tf2_ros import TransformException
@@ -23,14 +22,13 @@ class MsisProbClouds(Node):
         self.declare_parameter('marker_topic', Parameter.Type.STRING)
         self.declare_parameter('cloud_sub_topic', Parameter.Type.STRING)
         self.declare_parameter('fan_pub_topic', Parameter.Type.STRING)
-        self.declare_parameter('range_filter_pub_topic', Parameter.Type.STRING)
         self.declare_parameter('vertical_fov_deg', Parameter.Type.DOUBLE)
         self.declare_parameter('resolution', Parameter.Type.DOUBLE)
         self.declare_parameter('min_range', Parameter.Type.DOUBLE)
         self.declare_parameter('noise_floor', Parameter.Type.DOUBLE)
         self.declare_parameter('z_max', Parameter.Type.DOUBLE)
         self.declare_parameter('world_frame_id', Parameter.Type.STRING)
-        self.declare_parameter('sensor_frame_id', Parameter.Type.STRING)
+        self.sensor_frame_id = ''
         self.declare_parameter('sound_speed', Parameter.Type.DOUBLE)
         self.declare_parameter('frequency', Parameter.Type.DOUBLE)
         self.declare_parameter('aperture_size', Parameter.Type.DOUBLE)
@@ -38,12 +36,10 @@ class MsisProbClouds(Node):
         marker_topic = self.get_parameter('marker_topic').value
         cloud_sub_topic = self.get_parameter('cloud_sub_topic').value
         fan_pub_topic = self.get_parameter('fan_pub_topic').value
-        range_filter_pub_topic = self.get_parameter('range_filter_pub_topic').value
 
         self.marker_sub = self.create_subscription(Marker, marker_topic, self.marker_cb, 10)
         self.cloud_sub = self.create_subscription(PointCloud2, cloud_sub_topic, self.cloud_cb, 10)
         self.pub = self.create_publisher(PointCloud2, fan_pub_topic, 10)
-        self.pub_range_filter_profile = self.create_publisher(Float32MultiArray, range_filter_pub_topic, 10)
 
         v_fov_deg = self.get_parameter('vertical_fov_deg').value
         resolution = self.get_parameter('resolution').value
@@ -51,7 +47,6 @@ class MsisProbClouds(Node):
         self.noise_floor = self.get_parameter('noise_floor').value
         self.z_max = self.get_parameter('z_max').value
         self.world_frame_id = self.get_parameter('world_frame_id').value
-        self.sensor_frame_id = self.get_parameter('sensor_frame_id').value
 
         # Create elevation angle arrays
         el_angles_deg = np.arange(-v_fov_deg / 2, v_fov_deg / 2 + resolution, resolution)
@@ -91,6 +86,7 @@ class MsisProbClouds(Node):
 
     # -------- Marker callback ----------
     def marker_cb(self, msg: Marker):
+        self.sensor_frame_id = msg.header.frame_id
         self.voxel_centroids = np.array([(p.x, p.y, p.z) for p in msg.points], dtype=np.float32)
         self.voxel_tree = cKDTree(self.voxel_centroids)
         self.voxel_resolution = msg.scale.x
@@ -128,14 +124,11 @@ class MsisProbClouds(Node):
         return np.column_stack([pts['x'], pts['y'], pts['z'], pts['intensity']])
 
     def range_filter(self, pointclouds):
-        """Range filter + publish aligned intensity profile. Returns filtered."""
+        """Range filter"""
         mask = (np.isfinite(pointclouds).all(axis=1) &
                 ((pointclouds[:, 0]**2 + pointclouds[:, 1]**2 + pointclouds[:, 2]**2) > self.min_range**2))
         profile = np.zeros(len(pointclouds), dtype=np.float32)
         profile[mask] = pointclouds[mask, 3]
-        msg = Float32MultiArray()
-        msg.data = profile.tolist()
-        self.pub_range_filter_profile.publish(msg)
         return pointclouds[mask]
 
     def depth_filter(self, pointcloud_msg):
