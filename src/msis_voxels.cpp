@@ -22,7 +22,7 @@ public:
         this->declare_parameter("vertical_fov_deg", 25.0);
         this->declare_parameter("resolution", 1.0);
         this->declare_parameter<std::string>("marker_topic");
-        this->declare_parameter("sim", false);
+        this->declare_parameter("stonefish", false);
         this->declare_parameter<std::string>("cloud_sub_topic", "");
         this->declare_parameter<std::string>("sensor_frame_id", "alpha_rise/ping360_link");
         this->declare_parameter<std::string>("echo_sub_topic", "/alpha_rise/msis/echo");
@@ -35,15 +35,15 @@ public:
         this->get_parameter("sensor_frame_id", frame_id_);
         std::string marker_topic;
         this->get_parameter("marker_topic", marker_topic);
-        bool sim;
-        this->get_parameter("sim", sim);
+        bool stonefish;
+        this->get_parameter("stonefish", stonefish);
 
         h_fov_ = h_fov_deg * M_PI / 180.0;
         v_fov_ = v_fov_deg * M_PI / 180.0;
 
         marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>(marker_topic, 10);
 
-        if (sim) {
+        if (stonefish) {
             std::string cloud_topic;
             this->get_parameter("cloud_sub_topic", cloud_topic);
             angle_sub_ = this->create_subscription<std_msgs::msg::Float32>(

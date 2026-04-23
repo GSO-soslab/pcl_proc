@@ -295,7 +295,7 @@ private:
         geometry_msgs::msg::TransformStamped trans;
         try {
             trans = tf_buffer_->lookupTransform(
-                frame_id_, msg->header.frame_id, msg->header.stamp, 100ms
+                frame_id_, msg->header.frame_id, tf2::TimePointZero, 100ms
             );
         } catch (tf2::TransformException &ex) {
             RCLCPP_WARN(this->get_logger(), "TF lookup failed: %s", ex.what());

@@ -11,9 +11,9 @@
       # --- Topics ---
       # Pointcloud topics to subscribe
       pointcloud_sub_topics:
-        - "/alpha_rise/fls/pointcloud/probability"
+        - "/alpha_rise/oculus/pointcloud/probability"
         - "/alpha_rise/msis/pointcloud/probability"
-        - "/alpha_rise/mbes/pointcloud/probability"
+        - "/alpha_rise/surveyor/pointcloud/probability"
 
       # Odometry topic used to track vehicle depth (Z position)
       odometry_sub_topic: "/alpha_rise/odometry/filtered"
