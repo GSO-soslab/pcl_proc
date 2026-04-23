@@ -28,6 +28,10 @@ class Wp_Admin(Node):
         Constructer. Init all pubs, subs, variables
         """
 
+        self.declare_parameter('odom_frame', Parameter.Type.STRING)
+        self.declare_parameter('base_frame', Parameter.Type.STRING)
+        self.declare_parameter('line_frame', Parameter.Type.STRING)
+        self.declare_parameter('edge_frame', Parameter.Type.STRING)
         self.declare_parameter("stand_off_distance", Parameter.Type.DOUBLE)
         self.declare_parameter('update_waypoint_topic', Parameter.Type.STRING)
         self.declare_parameter('path_topic', Parameter.Type.STRING)
@@ -39,6 +43,10 @@ class Wp_Admin(Node):
         self.declare_parameter('check_state_update_rate', Parameter.Type.INTEGER)
         self.declare_parameter('operating_depth', Parameter.Type.DOUBLE)
         
+        self.odom_frame = self.get_parameter('odom_frame').get_parameter_value().string_value
+        self.base_frame = self.get_parameter('base_frame').get_parameter_value().string_value
+        self.line_frame = self.get_parameter('line_frame').get_parameter_value().string_value
+        self.edge_frame = self.get_parameter('edge_frame').get_parameter_value().string_value
         self.standoff_distance_in_meters = self.get_parameter("stand_off_distance").get_parameter_value().double_value
         update_waypoint_topic = self.get_parameter('update_waypoint_topic').get_parameter_value().string_value
         path_topic = self.get_parameter('path_topic').get_parameter_value().string_value
@@ -48,7 +56,6 @@ class Wp_Admin(Node):
         self.n_points = self.get_parameter('n_points').get_parameter_value().integer_value
         self.reacquisition_s_param = self.get_parameter('reacquisition_s_param').get_parameter_value().double_value
         self.update_rate = self.get_parameter('check_state_update_rate').get_parameter_value().integer_value
-        self.clear_entire_costmap_name = "/alpha_rise/clear_entirely_costmap"
 
         #To remove surface reflections from FLS, this is the min depth, the vehicle must be at.
         # self.depth = -math.tan(math.radians(self.depth)) * self.standoff_distance_in_meters
@@ -271,10 +278,10 @@ class Wp_Admin(Node):
             return
         try:
             #Vx position and bearing in Odom frame.
-            self.base_to_odom_tf = self.tf_buffer.lookup_transform("alpha_rise/odom", "alpha_rise/base_link",
+            self.base_to_odom_tf = self.tf_buffer.lookup_transform(self.odom_frame, self.base_frame,
                                                                 rclpy.time.Time())
             #Odom frame point in Vx frame
-            self.odom_to_base_tf = self.tf_buffer.lookup_transform("alpha_rise/base_link", "alpha_rise/odom",
+            self.odom_to_base_tf = self.tf_buffer.lookup_transform(self.base_frame, self.odom_frame,
                                                                 rclpy.time.Time())
         except Exception as e:
             self.get_logger().warn(f"TF lookup failed in mission_core: {e}", throttle_duration_sec=5)
@@ -395,19 +402,17 @@ class Wp_Admin(Node):
         self.bool_exit_mode = True
         # Costmap frames only exists if path can be generated. If in Reacquisition mode,
         # then direct away from the iceberg
-        if self.tf_buffer.can_transform("alpha_rise/odom",
-                                        "alpha_rise/costmap/line_frame",
-                                        rclpy.time.Time() ) and self.tf_buffer.can_transform("alpha_rise/costmap/line_frame",
-                                                                                "alpha_rise/base_link",
-                                                                                rclpy.time.Time()  # latest available
-                                                                                ):
+        if self.tf_buffer.can_transform(self.odom_frame, self.line_frame,
+                                        rclpy.time.Time()) and self.tf_buffer.can_transform(self.line_frame,
+                                                                                self.base_frame,
+                                                                                rclpy.time.Time()):
             #Line_frame point in Odom Frame
-            line_frame_to_odom_tf = self.tf_buffer.lookup_transform("alpha_rise/odom", 
-                                                                    "alpha_rise/costmap/line_frame", 
+            line_frame_to_odom_tf = self.tf_buffer.lookup_transform(self.odom_frame,
+                                                                    self.line_frame,
                                                                 rclpy.time.Time())
-            
-            vx_to_line_frame_tf = self.tf_buffer.lookup_transform("alpha_rise/costmap/line_frame", 
-                                                                    "alpha_rise/base_link", 
+
+            vx_to_line_frame_tf = self.tf_buffer.lookup_transform(self.line_frame,
+                                                                    self.base_frame,
                                                                 rclpy.time.Time())
             exit_point = PointStamped()
             exit_point.point.x = np.float64(0)
