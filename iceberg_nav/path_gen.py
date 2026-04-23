@@ -125,20 +125,24 @@ class PathGen(Node):
         """
         Transform Stuff
         """
-        # Check robot_localisation has started publishing tf
-        # self.buffer.can_transform(self.base_frame, self.odom_frame, rospy.Time(), rospy.Duration(8.0))
-        self.buffer.can_transform(self.base_frame, self.odom_frame, Time())
-        #Get Odom->Vx TF
-        odom_vx_tf = self.buffer.lookup_transform(self.base_frame, self.odom_frame, rclpy.time.Time())
-        self.vx_yaw = tf_transform.euler_from_quaternion([odom_vx_tf.transform.rotation.x,
-                                            odom_vx_tf.transform.rotation.y,
-                                            odom_vx_tf.transform.rotation.z,
-                                            odom_vx_tf.transform.rotation.w])[2]
-        #Get Vx->Odom TF
-        vx_odom_tf = self.buffer.lookup_transform(self.odom_frame, self.base_frame, rclpy.time.Time())
-        self.vx_x = vx_odom_tf.transform.translation.x
-        self.vx_y = vx_odom_tf.transform.translation.y
-        self.vx_z = vx_odom_tf.transform.translation.z # depth is -ve
+        if not self.buffer.can_transform(self.base_frame, self.odom_frame, Time()):
+            self.get_logger().warn('TF not available yet', throttle_duration_sec=5.0)
+            return
+        try:
+            #Get Odom->Vx TF
+            odom_vx_tf = self.buffer.lookup_transform(self.base_frame, self.odom_frame, rclpy.time.Time())
+            self.vx_yaw = tf_transform.euler_from_quaternion([odom_vx_tf.transform.rotation.x,
+                                                odom_vx_tf.transform.rotation.y,
+                                                odom_vx_tf.transform.rotation.z,
+                                                odom_vx_tf.transform.rotation.w])[2]
+            #Get Vx->Odom TF
+            vx_odom_tf = self.buffer.lookup_transform(self.odom_frame, self.base_frame, rclpy.time.Time())
+            self.vx_x = vx_odom_tf.transform.translation.x
+            self.vx_y = vx_odom_tf.transform.translation.y
+            self.vx_z = vx_odom_tf.transform.translation.z # depth is -ve
+        except Exception as e:
+            self.get_logger().warn(f'TF lookup failed: {e}', throttle_duration_sec=5.0)
+            return
 
         """
         Costmap
