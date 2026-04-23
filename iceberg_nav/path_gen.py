@@ -32,13 +32,12 @@ class PathGen(Node):
         self.declare_parameter('odom_frame', Parameter.Type.STRING)
         self.declare_parameter('base_frame', Parameter.Type.STRING)
         self.declare_parameter('debug', Parameter.Type.BOOL)
-        self.declare_parameter('enable_search_mode', Parameter.Type.BOOL)
+        self.declare_parameter('minimum_depth_for_path', Parameter.Type.DOUBLE)
         self.declare_parameter('costmap_topic', Parameter.Type.STRING)
         self.declare_parameter('costmap_method', Parameter.Type.STRING)
         self.declare_parameter('path_topic', Parameter.Type.STRING)
         self.declare_parameter('canny_min_threshold', Parameter.Type.INTEGER)
         self.declare_parameter('canny_max_threshold', Parameter.Type.INTEGER)
-        self.declare_parameter('msis_vertical_beamwidth', Parameter.Type.INTEGER)
         self.declare_parameter('standoff_distance_meters', Parameter.Type.DOUBLE)
         self.declare_parameter('points_to_sample_from_curve', Parameter.Type.INTEGER)
         self.declare_parameter('min_scan_angle', Parameter.Type.INTEGER)
@@ -46,20 +45,19 @@ class PathGen(Node):
         self.declare_parameter('distance_constraint', Parameter.Type.DOUBLE)
         self.declare_parameter('surge_velocity',Parameter.Type.DOUBLE)
         self.declare_parameter('max_yaw_rate',Parameter.Type.DOUBLE)
-        self.declare_parameter('edge_frame_id', Parameter.Type.STRING)
-        self.declare_parameter('line_frame_id', Parameter.Type.STRING)
+        self.declare_parameter('edge_frame', Parameter.Type.STRING)
+        self.declare_parameter('line_frame', Parameter.Type.STRING)
 
         # Get parameters
         self.odom_frame = self.get_parameter('odom_frame').get_parameter_value().string_value
         self.base_frame = self.get_parameter('base_frame').get_parameter_value().string_value
         self.debug = self.get_parameter('debug').get_parameter_value().bool_value
-        enable_search_mode = self.get_parameter('enable_search_mode').get_parameter_value().bool_value
+        self.minimum_depth_for_path = self.get_parameter('minimum_depth_for_path').get_parameter_value().double_value
         costmap_topic = self.get_parameter('costmap_topic').get_parameter_value().string_value
         self.costmap_method = self.get_parameter('costmap_method').get_parameter_value().string_value
         path_topic = self.get_parameter('path_topic').get_parameter_value().string_value
         self.canny_min = self.get_parameter('canny_min_threshold').get_parameter_value().integer_value
         self.canny_max = self.get_parameter('canny_max_threshold').get_parameter_value().integer_value
-        msis_vertical_beamwidth = self.get_parameter('msis_vertical_beamwidth').get_parameter_value().integer_value
         self.distance_in_meters = self.get_parameter('standoff_distance_meters').get_parameter_value().double_value
         self.n_points = self.get_parameter('points_to_sample_from_curve').get_parameter_value().integer_value
         self.min_scan_angle = self.get_parameter('min_scan_angle').get_parameter_value().integer_value
@@ -67,13 +65,9 @@ class PathGen(Node):
         self.distance_constraint = self.get_parameter('distance_constraint').get_parameter_value().double_value
         self.max_surge = self.get_parameter('surge_velocity').get_parameter_value().double_value
         self.max_yaw_rate = self.get_parameter('max_yaw_rate').get_parameter_value().double_value
-        self.edge_frame_id = self.get_parameter('edge_frame_id').get_parameter_value().string_value
-        self.line_frame_id = self.get_parameter('line_frame_id').get_parameter_value().string_value
+        self.edge_frame_id = self.get_parameter('edge_frame').get_parameter_value().string_value
+        self.line_frame_id = self.get_parameter('line_frame').get_parameter_value().string_value
 
-        if enable_search_mode:
-            self.minimum_depth_for_path = -(math.tan(math.radians(msis_vertical_beamwidth / 2)) * self.distance_in_meters)
-        else:
-            self.minimum_depth_for_path = 0
 
         # Subscriber
         self.create_subscription(OccupancyGrid, costmap_topic, self.mapCB, 10)
