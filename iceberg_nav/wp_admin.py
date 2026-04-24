@@ -136,6 +136,8 @@ class Wp_Admin(Node):
 
         self.bool_search_mode = False
 
+        self.bool_kill_state = False
+
         self.valid_point = True
 
         self.valid_best_point = True
@@ -233,31 +235,35 @@ class Wp_Admin(Node):
             response = future.result()
             n_wpt = len(response.wpt)
             msg = Int16()
-            # n_wpt <= 3: 1 pre-existing helm wpt + 1 or 2 published wpts (best_point [+ farthest])
-            if n_wpt <= 3:
-                # Vehicle is navigating away from iceberg after timeout
-                if self.bool_exit_mode:
-                    msg.data = 2   # exit mode
-                    self.pub_state.publish(msg)
-                else:
-                    # Actively following iceberg: best_point + optional farthest sector point
-                    msg.data = 0   # following
-                    self.pub_state.publish(msg)
-            # n_wpt > 3: 1 pre-existing + 8 arc/circle points (search or reacquisition arc)
-            else:
-                # Vehicle is executing a concentric circle search pattern
-                if self.bool_search_mode:
-                    msg.data = -1  # search
-                    self.pub_state.publish(msg)
-                # Vehicle is executing a reacquisition arc after losing the iceberg
-                else:
-                    if self.mission_command != "EMPTY":
-                        msg.data = 1   # reacquisition
+            if not self.bool_kill_state:
+                # n_wpt <= 3: 1 pre-existing helm wpt + 1 or 2 published wpts (best_point [+ farthest])
+                if n_wpt <= 3:
+                    # Vehicle is navigating away from iceberg after timeout
+                    if self.bool_exit_mode:
+                        msg.data = 2   # exit mode
                         self.pub_state.publish(msg)
                     else:
-                        # Mission not started yet
-                        msg.data = -2  # idle
+                        # Actively following iceberg: best_point + optional farthest sector point
+                        msg.data = 0   # following
                         self.pub_state.publish(msg)
+                # n_wpt > 3: 1 pre-existing + 8 arc/circle points (search or reacquisition arc)
+                else:
+                    # Vehicle is executing a concentric circle search pattern
+                    if self.bool_search_mode:
+                        msg.data = -1  # search
+                        self.pub_state.publish(msg)
+                    # Vehicle is executing a reacquisition arc after losing the iceberg
+                    else:
+                        if self.mission_command != "EMPTY":
+                            msg.data = 1   # reacquisition
+                            self.pub_state.publish(msg)
+                        else:
+                            # Mission not started yet
+                            msg.data = -2  # idle
+                            self.pub_state.publish(msg)
+            else:
+                msg.data = -3   # kill
+                self.pub_state.publish(msg)
 
     def path_cB(self, msg):
         """
@@ -363,6 +369,10 @@ class Wp_Admin(Node):
             #the vehicle reaches end of a valid path.
             elif self.state == "start":
                 self.iceberg_reacquisition_mode(wpts)
+
+            elif self.state == "kill":
+                self.get_logger().warn("Helm switched to Kill", throttle_duration_sec=5)
+                self.bool_kill_state = True
 
         #Path is still published when no costmap. But the n_points is 1 (vx_x, vx_y)
         #We use that parameter to create a new bhvr mode.
