@@ -79,7 +79,6 @@ class Wp_Admin(Node):
 
         # Timers
         self.search_mode_timer_param = self.get_parameter('search_mode_timer').get_parameter_value().integer_value
-        self.search_mode_timer = time.time()
 
         self.follow_mode_timer_param = self.get_parameter('follow_mode_timer').get_parameter_value().integer_value
         self.follow_flag = 0
@@ -138,13 +137,13 @@ class Wp_Admin(Node):
 
         self.bool_kill_state = False
 
-        self.valid_point = True
+        self.bool_exit_mode = False
 
         self.valid_best_point = True
 
-        self.bool_exit_mode = False
         self.search_mode_complete = False
         self._reacquisition_active = False
+        self.bool_initial_search = False
 
         self.mission_command = "EMPTY"
 
@@ -163,6 +162,12 @@ class Wp_Admin(Node):
             response.success = True
             response.message = f"VALID CMD RECIEVED, EXECUTING MISSION"
             self.bool_exit_mode = False
+
+            if self.mission_command in ["START", "RESTART"]:
+                self.bool_initial_search = True
+                self.search_mode_complete = False
+                self.count_concentric_circles = 0
+                self.follow_flag = 0
 
             if self.mission_command == "CONTINUE":
                 request = SetBool.Request()
@@ -205,16 +210,24 @@ class Wp_Admin(Node):
         """
         Best point callback.
         """
-        if self.base_to_odom_tf is None:
+        if self.base_to_odom_tf is None or self.odom_to_base_tf is None:
             return
-        vx = round(self.base_to_odom_tf.transform.translation.x)
-        vy = round(self.base_to_odom_tf.transform.translation.y)
+        vx = self.base_to_odom_tf.transform.translation.x
+        vy = self.base_to_odom_tf.transform.translation.y
 
-        if math.hypot(round(vx-msg.x), round(vy-msg.y)) > 5.0:
-            self.x, self.y, z = msg.x, msg.y, msg.z
+        pt = PointStamped()
+        pt.point.x = msg.x
+        pt.point.y = msg.y
+        pt_in_base = tf2_geometry_msgs.do_transform_point(pt, self.odom_to_base_tf)
+
+        far_enough = math.hypot(vx - msg.x, vy - msg.y) > 5.0
+        ahead = pt_in_base.point.x > 0
+
+        if far_enough and ahead:
+            self.x, self.y = msg.x, msg.y
             self.valid_best_point = True
         else:
-            self.valid_best_point =False
+            self.valid_best_point = False
 
     def distance_cB(self, msg):
         """
@@ -295,7 +308,14 @@ class Wp_Admin(Node):
         #Create Waypoint Message
         wpts = Waypoints()
         self.header = msg.header
-        # Valid path is n_points long. 
+
+        if self.bool_initial_search:
+            self.bool_initial_search = False
+            self.count_concentric_circles += 1
+            self.search_mode(wpts)
+            return
+
+        # Valid path is n_points long.
         # Path is always being published.
         # If same path, then no new path is then published.
         if len(msg.poses) == self.n_points:
@@ -311,10 +331,9 @@ class Wp_Admin(Node):
                   
             valid_farthest_point = self.farthest_sector_pose is not None
 
-            if self.state == "survey":
+            if self.state == "mapping":
                 if self.valid_best_point:
 
-                    self.search_mode_timer = time.time()
                     #grab time of follow_mode initializing
                     if self.follow_flag == 0:
                         self.follow_mode_timer = time.time()
@@ -374,15 +393,23 @@ class Wp_Admin(Node):
                 self.get_logger().warn("Helm switched to Kill", throttle_duration_sec=5)
                 self.bool_kill_state = True
 
+            elif self.state == "survey":
+                if not self.bool_exit_mode:
+                    self.get_logger().info(f"Mission interrupted. Moving to a safe point")
+                    self.exit_mode(wpts, info = f"Mission interupted. Moving to a safe point")
+
         #Path is still published when no costmap. But the n_points is 1 (vx_x, vx_y)
         #We use that parameter to create a new bhvr mode.
         else:
             # rospy.loginfo("Searching Mode")
-            if self.state == "start" and not self.search_mode_complete:
-                self.count_concentric_circles += 1
-                self.search_mode(wpts)
+            if self.state == "start":
+                if not self.search_mode_complete:
+                    self.count_concentric_circles += 1
+                    self.search_mode(wpts)
+                else:
+                    self.iceberg_reacquisition_mode(wpts)
 
-            elif self.state == "survey":
+            elif self.state == "mapping":
                 #If timer runs out, then the node is killed.
                 if(time.time() - self.search_mode_timer) > self.search_mode_timer_param: #sec
                     request = ChangeState.Request()
@@ -465,13 +492,17 @@ class Wp_Admin(Node):
         self.pub_state.publish(msg)
         self.get_logger().info(info)
         if not hasattr(self, '_exit_reset_timer') or self._exit_reset_timer.is_canceled():
-            self._exit_reset_timer = self.create_timer(10.0, self._exit_mode_reset)
+            self._exit_reset_timer = self.create_timer(1.0, self._exit_mode_reset)
 
     def _exit_mode_reset(self):
         self._exit_reset_timer.cancel()
         self.mission_command = "EMPTY"
         self.count_concentric_circles = 0
         self.bool_search_mode = False
+        self.follow_flag = 0
+        self.bool_exit_mode = False
+        self.search_mode_complete = False
+        self.get_logger().info("Exit mode reset. Mission can be started again.")
 
     def search_mode(self, wpts):
         if self.count_concentric_circles > self.search_mode_max_circles:
@@ -485,6 +516,7 @@ class Wp_Admin(Node):
             return
 
         self.bool_search_mode = True
+        self.search_mode_timer = time.time()
 
         search_mode_depth = self.search_mode_depth
         """
@@ -521,14 +553,14 @@ class Wp_Admin(Node):
             wpts.wpt.append(wpt)
 
         request = ChangeState.Request()
-        request.state = "survey"
+        request.state = "mapping"
         request.caller = self.node_name
         future = self.change_state_service_client.call_async(request)
         future.add_done_callback(self.get_state_callback)
         self.pub_update.publish(wpts)
         self.search_mode_complete = True
         self.get_logger().info("Search Mode", throttle_duration_sec = 3)
-        self.state = "survey"
+        self.state = "mapping"
 
     def iceberg_reacquisition_mode(self, wpts):
         """
@@ -539,7 +571,7 @@ class Wp_Admin(Node):
         self._reacquisition_active = True
 
         request = ChangeState.Request()
-        request.state = "survey"
+        request.state = "mapping"
         request.caller = self.node_name
         future = self.change_state_service_client.call_async(request)
         future.add_done_callback(self.get_state_callback)
