@@ -14,23 +14,23 @@ from geometry_msgs.msg import PointStamped, Point
 from std_msgs.msg import Float32, Int16
 from std_srvs.srv import SetBool
 import math
-from mvp_msgs.srv import  GetState, ChangeState, GetWaypoints, SetString
+from mvp_msgs.srv import  GetState, ChangeState, SetString
 from path_utils import draw_arc
 from mvp_msgs.msg import Waypoints, Waypoint
 import time
 import tf2_ros
 import tf2_geometry_msgs
 import numpy as np
-from enum import Enum, auto
+from enum import Enum
 
 
 class Mode(Enum):
-    IDLE          = auto()   # no mission active
-    SEARCH        = auto()   # navigating search circle, waiting for iceberg contact
-    FOLLOW        = auto()   # valid contact; publishing best_point/farthest waypoints
-    REACQUISITION = auto()   # helm in "start" state, doing reacquisition arc
-    EXIT          = auto()   # published exit waypoint
-    KILL          = auto()   # helm killed
+    IDLE          = -2   # no mission active
+    SEARCH        = -1   # navigating search circle, waiting for iceberg contact
+    FOLLOW        =  0   # valid contact; publishing best_point/farthest waypoints
+    REACQUISITION =  1   # helm in "start" state, doing reacquisition arc
+    EXIT          =  2   # published exit waypoint
+    KILL          = -3   # helm killed
 
 
 class Wp_Admin(Node):
@@ -49,7 +49,6 @@ class Wp_Admin(Node):
         self.declare_parameter('path_topic', Parameter.Type.STRING)
         self.declare_parameter('get_state_service', Parameter.Type.STRING)
         self.declare_parameter('change_state_service', Parameter.Type.STRING )
-        self.declare_parameter('get_waypoint_service', Parameter.Type.STRING)
         self.declare_parameter('n_points', Parameter.Type.INTEGER)
         self.declare_parameter('reacquisition_s_param', Parameter.Type.DOUBLE)
         self.declare_parameter('check_state_update_rate', Parameter.Type.INTEGER)
@@ -64,7 +63,6 @@ class Wp_Admin(Node):
         path_topic = self.get_parameter('path_topic').get_parameter_value().string_value
         self.get_state_service_name = self.get_parameter('get_state_service').get_parameter_value().string_value
         self.change_state_service_name = self.get_parameter('change_state_service').get_parameter_value().string_value
-        self.get_waypoint_service_name = self.get_parameter('get_waypoint_service').get_parameter_value().string_value
         self.n_points = self.get_parameter('n_points').get_parameter_value().integer_value
         self.reacquisition_s_param = self.get_parameter('reacquisition_s_param').get_parameter_value().double_value
         self.update_rate = self.get_parameter('check_state_update_rate').get_parameter_value().integer_value
@@ -108,7 +106,6 @@ class Wp_Admin(Node):
         self.create_subscription(Int16, path_topic + "/surge", self.surge_cB, 1)
 
         # Declare services
-        self.get_waypoint_service_client = self.create_client(GetWaypoints, self.get_waypoint_service_name)
         self.get_state_service_client = self.create_client(GetState, self.get_state_service_name)
         self.change_state_service_client = self.create_client(ChangeState, self.change_state_service_name)
         self.depth_planner_service_client = self.create_client(SetBool, '/alpha_rise/iceberg/plan_depth')
@@ -132,7 +129,6 @@ class Wp_Admin(Node):
         self._search_circle_sent = False
 
         # Sensor data
-        self.distance_to_obstacle = None
         self.x, self.y = 0.0, 0.0
         self.valid_best_point = False
         self.plan_depth = False
@@ -144,7 +140,6 @@ class Wp_Admin(Node):
         self.odom_to_base_tf = None
 
         self.node_name = self.get_name()
-        self.poses = []
 
         self.create_timer(self.update_rate, self.check_state)
 
@@ -241,26 +236,10 @@ class Wp_Admin(Node):
             self.valid_best_point = False
 
     def distance_cB(self, msg):
-        """Distance to obstacle callback — triggers state publishing."""
-        self.distance_to_obstacle = msg.data
-        request = GetWaypoints.Request()
-        request.count.data = 0
-        future = self.get_waypoint_service_client.call_async(request)
-        future.add_done_callback(self.get_n_waypoints)
-
-    def get_n_waypoints(self, future):
-        if future.done():
-            mode_to_state = {
-                Mode.KILL:          -3,
-                Mode.EXIT:           2,
-                Mode.SEARCH:        -1,
-                Mode.REACQUISITION:  1,
-                Mode.FOLLOW:         0,
-                Mode.IDLE:          -2,
-            }
-            msg = Int16()
-            msg.data = mode_to_state.get(self.mode, -2)
-            self.pub_state.publish(msg)
+        """Distance to obstacle callback — publishes current mode state."""
+        state_msg = Int16()
+        state_msg.data = self.mode.value
+        self.pub_state.publish(state_msg)
 
     # ------------------------------------------------------------------ #
     #  Main path callback                                                  #
