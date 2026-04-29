@@ -18,6 +18,6 @@
 
     min_scan_angle: -90 #degrees
     max_scan_angle: 90
-    distance_constraint: 15.0 #meters
+    distance_constraint: 20.0 #meters
     max_yaw_rate: 0.8 #rad/s #0.8rad is 45degree
     surge_velocity: 0.8 #m/s 

@@ -101,15 +101,15 @@ def generate_launch_description():
     # bag_file_path = '/media/tony/Vault/2025_12_05_Whale_Rock/rosbag2_2025_12_05-16_09_45/rosbag2_2025_12_05-16_09_47'
     # bag_file_path = '/media/tony/Vault/2025_12_05_Whale_Rock/rosbag2_2025_12_05-16_26_08/rosbag2_2025_12_05-16_26_09'
     # bag_file_path = '/media/tony/Vault/2025_12_05_Whale_Rock/rosbag2_2025_12_05-16_43_41/rosbag2_2025_12_05-16_43_42'
-    bag_file_path = '/media/tony/Vault/2025_12_05_Whale_Rock/rosbag2_2025_12_05-16_54_58/rosbag2_2025_12_05-16_55_00'
+    # bag_file_path = '/media/tony/Vault/2025_12_05_Whale_Rock/rosbag2_2025_12_05-16_54_58/rosbag2_2025_12_05-16_55_00'
     # bag_file_path = '/media/tony/Vault/2025_12_05_Whale_Rock/rosbag2_2025_12_05-17_09_41/rosbag2_2025_12_05-17_09_42'
-    # bag_file_path = '/media/tony/Vault/2025_12_05_Whale_Rock/rosbag2_2025_12_05-17_22_29/rosbag2_2025_12_05-17_22_30'
+    bag_file_path = '/media/tony/Vault/2025_12_05_Whale_Rock/rosbag2_2025_12_05-17_22_29/rosbag2_2025_12_05-17_22_30'
     # bag_file_path = '/media/tony/Vault/2025_12_05_Whale_Rock/rosbag2_2025_12_05-17_35_12/rosbag2_2025_12_05-17_35_13'
     
     # bag_file_path = '/home/tony/auv_ws/bags/mbes_testing_allen_harbor_3_13_26/rosbag2_2026c_03_13-17_21_16/rosbag2_2026_03_13-17_21_16'
     # bag_file_path = '/home/tony/auv_ws/bags/mbes_testing_allen_harbor_3_13_26/rosbag2_2026_03_13-17_34_47/rosbag2_2026_03_13-17_34_48'
 
-    # bag_file_path = '/media/tony/Vault/2026_04_09_Whale_rock/rosbag2_2026_04_09-18_31_27/rosbag2_2026_04_09-18_31_28'
+    # bag_file_path = '/media/tony/Vault/2026_04_09_Whale_rock/rosbag2_2026_04_09 -18_31_27/rosbag2_2026_04_09-18_31_28'
 
     bag_play = ExecuteProcess(
         cmd=[
