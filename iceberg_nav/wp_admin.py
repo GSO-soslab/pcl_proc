@@ -15,6 +15,7 @@ from std_msgs.msg import Float32, Int16
 from std_srvs.srv import SetBool
 import math
 from mvp_msgs.srv import  GetState, ChangeState, GetWaypoints, SetString
+from path_utils import draw_arc
 from mvp_msgs.msg import Waypoints, Waypoint
 import time
 import tf2_ros
@@ -174,6 +175,7 @@ class Wp_Admin(Node):
                 self._transition(Mode.SEARCH)
                 self.count_concentric_circles = 0
                 self.follow_mode_timer = None
+                self.search_mode_timer = None
                 self._search_circle_sent = False
                 self.valid_best_point = False
                 for attr in ('_reacquisition_timer', '_reacquisition_wait_timer', '_exit_reset_timer'):
@@ -309,6 +311,9 @@ class Wp_Admin(Node):
             if self.valid_best_point and self.state == "mapping":
                 self._transition(Mode.FOLLOW)
                 self.follow_mode_timer = time.time()
+            elif self.state == "start":
+                # Helm finished the circle with no contact; expand to next radius
+                self._search_circle_sent = False
             return
 
         if len(msg.poses) == self.n_points:
@@ -463,7 +468,8 @@ class Wp_Admin(Node):
             self.destroy_node()
             return
 
-        self.search_mode_timer = time.time()
+        if self.search_mode_timer is None:
+            self.search_mode_timer = time.time()
 
         if self.count_concentric_circles == 1:
             self.search_mode_center = PointStamped()
@@ -474,12 +480,13 @@ class Wp_Admin(Node):
             self.search_mode_center, self.odom_to_base_tf)
 
         search_mode_radius = self.search_mode_initial_radius * self.count_concentric_circles
-        search_mode_points = self.draw_arc(
+        search_mode_points = draw_arc(
             number_of_points=8,
             start_angle=0,
             end_angle=2 * math.pi,
             center=[center_in_vx_frame.point.x, center_in_vx_frame.point.y],
-            radius=search_mode_radius)
+            radius=search_mode_radius,
+            transform=self.base_to_odom_tf)
 
         for pt in search_mode_points:
             wpt = Waypoint()
@@ -514,12 +521,13 @@ class Wp_Admin(Node):
 
         point_of_obstacle = [self.reacquisition_s_param * self.standoff_distance_in_meters,
                               -self.standoff_distance_in_meters]
-        corner_bhvr_points = self.draw_arc(
+        corner_bhvr_points = draw_arc(
             number_of_points=8,
             start_angle=math.pi / 2,
             end_angle=0,
             center=point_of_obstacle,
-            radius=self.standoff_distance_in_meters)
+            radius=self.standoff_distance_in_meters,
+            transform=self.base_to_odom_tf)
 
         for pt in corner_bhvr_points:
             wpt = Waypoint()
@@ -538,17 +546,20 @@ class Wp_Admin(Node):
 
     def _reacquisition_hold_done(self):
         self._reacquisition_timer.cancel()
+        if self.mode != Mode.REACQUISITION:
+            return
         if self.state == "kill":
             self._transition(Mode.KILL)
         elif self.state == "survey":
             self.exit_mode(Waypoints(), info="Interrupted by survey state.")
-        elif self.valid_best_point:
-            self._transition(Mode.FOLLOW)
         else:
             self._reacquisition_wait_timer = self.create_timer(1.0, self._reacquisition_wait_check)
 
     def _reacquisition_wait_check(self):
         """Poll at 1 Hz after hold expires; re-trigger arc only when helm is back in 'start'."""
+        if self.mode != Mode.REACQUISITION:
+            self._reacquisition_wait_timer.cancel()
+            return
         if self.state == "kill":
             self._reacquisition_wait_timer.cancel()
             self._transition(Mode.KILL)
@@ -560,6 +571,15 @@ class Wp_Admin(Node):
             self._transition(Mode.FOLLOW)
         elif self.state == "start":
             self._reacquisition_wait_timer.cancel()
+            try:
+                self.base_to_odom_tf = self.tf_buffer.lookup_transform(
+                    self.odom_frame, self.base_frame, rclpy.time.Time())
+                self.odom_to_base_tf = self.tf_buffer.lookup_transform(
+                    self.base_frame, self.odom_frame, rclpy.time.Time())
+            except Exception as e:
+                self.get_logger().warn(f"TF lookup failed in reacquisition retry: {e}", throttle_duration_sec=5)
+                self._reacquisition_wait_timer = self.create_timer(1.0, self._reacquisition_wait_check)
+                return
             self.iceberg_reacquisition_mode(Waypoints())
 
     # ------------------------------------------------------------------ #
@@ -574,26 +594,6 @@ class Wp_Admin(Node):
     def get_state_callback(self, future):
         response = future.result()
         self.state = response.state.name
-
-    # ------------------------------------------------------------------ #
-    #  Geometry helpers                                                    #
-    # ------------------------------------------------------------------ #
-
-    def draw_arc(self, number_of_points, start_angle, end_angle, center, radius):
-        """Create an arc in vehicle frame and transform to odom."""
-        angles = np.linspace(start_angle, end_angle, number_of_points)
-        corner_bhvr_points = [(center[0] + radius * math.cos(a),
-                               center[1] + radius * math.sin(a))
-                              for a in angles]
-        points_in_odom_frame = []
-        for p in corner_bhvr_points:
-            point_msg = PointStamped()
-            point_msg.point.x = p[0]
-            point_msg.point.y = p[1]
-            points_in_odom_frame.append(
-                tf2_geometry_msgs.do_transform_point(point_msg, self.base_to_odom_tf))
-        return points_in_odom_frame
-
 
 def main():
     rclpy.init()

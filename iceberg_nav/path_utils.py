@@ -8,6 +8,8 @@
 import numpy as np
 import cv2
 import math
+from geometry_msgs.msg import PointStamped
+import tf2_geometry_msgs
 
 ##Viz functions.
 def compare_two_lists(list1:list, list2:list, height:int, width:int):
@@ -149,6 +151,19 @@ def calculate_slope(x_coords:list, y_coords:list):
         #slope, intercept
         return beta_1, beta_0
 
+
+def draw_arc(number_of_points, start_angle, end_angle, center, radius, transform):
+    """Create an arc in vehicle frame and transform to odom."""
+    angles = np.linspace(start_angle, end_angle, number_of_points)
+    points = [(center[0] + radius * math.cos(a),
+               center[1] + radius * math.sin(a)) for a in angles]
+    result = []
+    for p in points:
+        pt = PointStamped()
+        pt.point.x = p[0]
+        pt.point.y = p[1]
+        result.append(tf2_geometry_msgs.do_transform_point(pt, transform))
+    return result
 
 def sum_angles_radians(*angles):
     """
