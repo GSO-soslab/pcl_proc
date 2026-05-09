@@ -20,7 +20,6 @@ from mvp_msgs.msg import Waypoints, Waypoint
 import time
 import tf2_ros
 import tf2_geometry_msgs
-import numpy as np
 from enum import Enum
 
 
@@ -33,7 +32,7 @@ class Mode(Enum):
     KILL          = -3   # helm killed
 
 
-class Wp_Admin(Node):
+class WpAdmin(Node):
     def __init__(self):
         super().__init__('waypoint_admin')
         """
@@ -43,7 +42,6 @@ class Wp_Admin(Node):
         self.declare_parameter('odom_frame', Parameter.Type.STRING)
         self.declare_parameter('base_frame', Parameter.Type.STRING)
         self.declare_parameter('line_frame', Parameter.Type.STRING)
-        self.declare_parameter('edge_frame', Parameter.Type.STRING)
         self.declare_parameter("stand_off_distance", Parameter.Type.DOUBLE)
         self.declare_parameter('update_waypoint_topic', Parameter.Type.STRING)
         self.declare_parameter('path_topic', Parameter.Type.STRING)
@@ -51,13 +49,13 @@ class Wp_Admin(Node):
         self.declare_parameter('change_state_service', Parameter.Type.STRING )
         self.declare_parameter('n_points', Parameter.Type.INTEGER)
         self.declare_parameter('reacquisition_s_param', Parameter.Type.DOUBLE)
+        self.declare_parameter('reacquisition_proximity_radius', Parameter.Type.DOUBLE)
         self.declare_parameter('check_state_update_rate', Parameter.Type.INTEGER)
         self.declare_parameter('operating_depth', Parameter.Type.DOUBLE)
 
         self.odom_frame = self.get_parameter('odom_frame').get_parameter_value().string_value
         self.base_frame = self.get_parameter('base_frame').get_parameter_value().string_value
         self.line_frame = self.get_parameter('line_frame').get_parameter_value().string_value
-        self.edge_frame = self.get_parameter('edge_frame').get_parameter_value().string_value
         self.standoff_distance_in_meters = self.get_parameter("stand_off_distance").get_parameter_value().double_value
         update_waypoint_topic = self.get_parameter('update_waypoint_topic').get_parameter_value().string_value
         path_topic = self.get_parameter('path_topic').get_parameter_value().string_value
@@ -65,6 +63,7 @@ class Wp_Admin(Node):
         self.change_state_service_name = self.get_parameter('change_state_service').get_parameter_value().string_value
         self.n_points = self.get_parameter('n_points').get_parameter_value().integer_value
         self.reacquisition_s_param = self.get_parameter('reacquisition_s_param').get_parameter_value().double_value
+        self.reacquisition_proximity_radius = self.get_parameter('reacquisition_proximity_radius').get_parameter_value().double_value
         self.update_rate = self.get_parameter('check_state_update_rate').get_parameter_value().integer_value
 
         self.declare_parameter('search_mode_depth', Parameter.Type.DOUBLE)
@@ -100,10 +99,10 @@ class Wp_Admin(Node):
         self.pub_state = self.create_publisher(Int16, path_topic + '/state', 1)
 
         # Declare subscribers
-        self.create_subscription(Path, path_topic, self.path_cB, 1)
-        self.create_subscription(Float32, path_topic + '/distance_to_obstacle', self.distance_cB, 1)
-        self.create_subscription(Point, path_topic + "/best_point", self.point_cB, 1)
-        self.create_subscription(Int16, path_topic + "/surge", self.surge_cB, 1)
+        self.create_subscription(Path, path_topic, self.path_cb, 1)
+        self.create_subscription(Float32, path_topic + '/distance_to_obstacle', self.distance_cb, 1)
+        self.create_subscription(Point, path_topic + "/best_point", self.point_cb, 1)
+        self.create_subscription(Int16, path_topic + "/surge", self.surge_cb, 1)
 
         # Declare services
         self.get_state_service_client = self.create_client(GetState, self.get_state_service_name)
@@ -124,13 +123,14 @@ class Wp_Admin(Node):
         self.depth = 0.0
 
         # Timers (wallclock start times, None = not running)
-        self.follow_mode_timer = None
+        self.follow_mode_start_time = None
         self.search_mode_timer = None
         self._search_circle_sent = False
 
         # Sensor data
         self.x, self.y = 0.0, 0.0
         self.valid_best_point = False
+        self.last_wpt_odom = None
         self.plan_depth = False
 
         # TF
@@ -169,7 +169,7 @@ class Wp_Admin(Node):
             if self.mission_command in ["START", "RESTART"]:
                 self._transition(Mode.SEARCH)
                 self.count_concentric_circles = 0
-                self.follow_mode_timer = None
+                self.follow_mode_start_time = None
                 self.search_mode_timer = None
                 self._search_circle_sent = False
                 self.valid_best_point = False
@@ -211,10 +211,10 @@ class Wp_Admin(Node):
     #  Sensor callbacks                                                    #
     # ------------------------------------------------------------------ #
 
-    def surge_cB(self, msg):
+    def surge_cb(self, msg):
         self.plan_depth = (msg.data == 1)
 
-    def point_cB(self, msg):
+    def point_cb(self, msg):
         """Best point callback."""
         if self.base_to_odom_tf is None or self.odom_to_base_tf is None:
             return
@@ -235,7 +235,7 @@ class Wp_Admin(Node):
         else:
             self.valid_best_point = False
 
-    def distance_cB(self, msg):
+    def distance_cb(self, msg):
         """Distance to obstacle callback — publishes current mode state."""
         state_msg = Int16()
         state_msg.data = self.mode.value
@@ -245,7 +245,7 @@ class Wp_Admin(Node):
     #  Main path callback                                                  #
     # ------------------------------------------------------------------ #
 
-    def path_cB(self, msg):
+    def path_cb(self, msg):
         """Path topic callback — drives the state machine."""
         if self.mode == Mode.IDLE:
             return
@@ -289,7 +289,7 @@ class Wp_Admin(Node):
             # Circle published — waiting for iceberg contact
             if self.valid_best_point and self.state == "mapping":
                 self._transition(Mode.FOLLOW)
-                self.follow_mode_timer = time.time()
+                self.follow_mode_start_time = time.time()
             elif self.state == "start":
                 # Helm finished the circle with no contact; expand to next radius
                 self._search_circle_sent = False
@@ -314,9 +314,9 @@ class Wp_Admin(Node):
 
         if self.state == "mapping":
             if self.valid_best_point:
-                if self.follow_mode_timer is None:
-                    self.follow_mode_timer = time.time()
-                elapsed = time.time() - self.follow_mode_timer
+                if self.follow_mode_start_time is None:
+                    self.follow_mode_start_time = time.time()
+                elapsed = time.time() - self.follow_mode_start_time
                 self.get_logger().info(
                     f"Following Mode with {round(self.follow_mode_timer_param - elapsed)}s remaining",
                     throttle_duration_sec=15)
@@ -326,22 +326,16 @@ class Wp_Admin(Node):
                 else:
                     self.exit_mode(wpts, info=f"Follow timer expired at {self.follow_mode_timer_param}s.")
 
-        elif self.state == "start":
-            self.iceberg_reacquisition_mode(wpts)
+            elif self._dist_to_last_wpt() < self.reacquisition_proximity_radius:
+                self.iceberg_reacquisition_mode(wpts)
 
     def _handle_no_path(self, wpts):
         """No costmap — short path."""
-        if self.state == "start":
-            self.iceberg_reacquisition_mode(wpts)
-
-        elif self.state == "mapping":
-            if self.search_mode_timer is not None and \
+        if self.state == "mapping":
+            if self._dist_to_last_wpt() < self.reacquisition_proximity_radius:
+                self.iceberg_reacquisition_mode(wpts)
+            elif self.search_mode_timer is not None and \
                (time.time() - self.search_mode_timer) > self.search_mode_timer_param:
-                request = ChangeState.Request()
-                request.state = "kill"
-                request.caller = self.node_name
-                future = self.change_state_service_client.call_async(request)
-                future.add_done_callback(self.get_state_callback)
                 self.get_logger().warn("Search mode took too long — shutting down")
                 self.destroy_node()
                 rclpy.shutdown()
@@ -368,6 +362,7 @@ class Wp_Admin(Node):
             wpt.wpt = farthest
             wpts.wpt.append(wpt)
 
+        self.last_wpt_odom = (wpts.wpt[-1].wpt.x, wpts.wpt[-1].wpt.y)
         self.pub_update.publish(wpts)
 
     # ------------------------------------------------------------------ #
@@ -384,6 +379,13 @@ class Wp_Admin(Node):
     #  Mode functions                                                      #
     # ------------------------------------------------------------------ #
 
+    def _dist_to_last_wpt(self):
+        if self.last_wpt_odom is None or self.base_to_odom_tf is None:
+            return float('inf')
+        vx = self.base_to_odom_tf.transform.translation.x
+        vy = self.base_to_odom_tf.transform.translation.y
+        return math.hypot(vx - self.last_wpt_odom[0], vy - self.last_wpt_odom[1])
+
     def exit_mode(self, wpts, info):
         """Navigate vehicle away from the iceberg."""
         self._transition(Mode.EXIT)
@@ -396,7 +398,7 @@ class Wp_Admin(Node):
                 self.line_frame, self.base_frame, rclpy.time.Time())
 
             exit_point = PointStamped()
-            exit_point.point.x = np.float64(0)
+            exit_point.point.x = 0.0
             if vx_to_line_frame_tf.transform.translation.y >= 0:
                 exit_point.point.y = self.exit_mode_distance + self.standoff_distance_in_meters
             else:
@@ -404,14 +406,14 @@ class Wp_Admin(Node):
             exit_point_odom = tf2_geometry_msgs.do_transform_point(exit_point, line_frame_to_odom_tf)
         else:
             exit_point = PointStamped()
-            exit_point.point.x = np.float64(0)
+            exit_point.point.x = 0.0
             exit_point.point.y = self.exit_mode_distance
             exit_point_odom = tf2_geometry_msgs.do_transform_point(exit_point, self.base_to_odom_tf)
 
         exit_msg = Point()
         exit_msg.x = exit_point_odom.point.x
         exit_msg.y = exit_point_odom.point.y
-        exit_msg.z = np.float64(0)
+        exit_msg.z = 0.0
 
         wpt = Waypoint()
         wpt.header = self.header
@@ -431,7 +433,7 @@ class Wp_Admin(Node):
         self._transition(Mode.IDLE)
         self.mission_command = "EMPTY"
         self.count_concentric_circles = 0
-        self.follow_mode_timer = None
+        self.follow_mode_start_time = None
         self.get_logger().info("Exit mode reset. Mission can be started again.")
 
     def search_mode(self, wpts):
@@ -439,11 +441,6 @@ class Wp_Admin(Node):
         if self.count_concentric_circles > self.search_mode_max_circles:
             self.get_logger().warn(
                 f"Search limit of {self.search_mode_max_circles} circles exceeded — shutting down")
-            request = ChangeState.Request()
-            request.state = "kill"
-            request.caller = self.node_name
-            future = self.change_state_service_client.call_async(request)
-            future.add_done_callback(self.get_state_callback)
             self.destroy_node()
             return
 
@@ -478,6 +475,9 @@ class Wp_Admin(Node):
             wpt.u = self.search_mode_surge
             wpts.wpt.append(wpt)
 
+        if wpts.wpt:
+            self.last_wpt_odom = (wpts.wpt[-1].wpt.x, wpts.wpt[-1].wpt.y)
+
         request = ChangeState.Request()
         request.state = "mapping"
         request.caller = self.node_name
@@ -490,13 +490,6 @@ class Wp_Admin(Node):
     def iceberg_reacquisition_mode(self, wpts):
         """Publish a reacquisition arc and hold for 5 s."""
         self._transition(Mode.REACQUISITION)
-
-        if self.state != "mapping":
-            request = ChangeState.Request()
-            request.state = "mapping"
-            request.caller = self.node_name
-            future = self.change_state_service_client.call_async(request)
-            future.add_done_callback(self.get_state_callback)
 
         point_of_obstacle = [self.reacquisition_s_param * self.standoff_distance_in_meters,
                               -self.standoff_distance_in_meters]
@@ -519,6 +512,9 @@ class Wp_Admin(Node):
             wpt.wpt = msg
             wpts.wpt.append(wpt)
 
+        if wpts.wpt:
+            self.last_wpt_odom = (wpts.wpt[-1].wpt.x, wpts.wpt[-1].wpt.y)
+
         self.get_logger().info("Iceberg Reacquisition Mode", throttle_duration_sec=3)
         self.pub_update.publish(wpts)
         self._reacquisition_timer = self.create_timer(5.0, self._reacquisition_hold_done)
@@ -535,7 +531,7 @@ class Wp_Admin(Node):
             self._reacquisition_wait_timer = self.create_timer(1.0, self._reacquisition_wait_check)
 
     def _reacquisition_wait_check(self):
-        """Poll at 1 Hz after hold expires; re-trigger arc only when helm is back in 'start'."""
+        """Poll at 1 Hz after hold expires; re-trigger arc when within 6 m of last waypoint."""
         if self.mode != Mode.REACQUISITION:
             self._reacquisition_wait_timer.cancel()
             return
@@ -548,8 +544,7 @@ class Wp_Admin(Node):
         elif self.valid_best_point:
             self._reacquisition_wait_timer.cancel()
             self._transition(Mode.FOLLOW)
-        elif self.state == "start":
-            self._reacquisition_wait_timer.cancel()
+        else:
             try:
                 self.base_to_odom_tf = self.tf_buffer.lookup_transform(
                     self.odom_frame, self.base_frame, rclpy.time.Time())
@@ -557,9 +552,10 @@ class Wp_Admin(Node):
                     self.base_frame, self.odom_frame, rclpy.time.Time())
             except Exception as e:
                 self.get_logger().warn(f"TF lookup failed in reacquisition retry: {e}", throttle_duration_sec=5)
-                self._reacquisition_wait_timer = self.create_timer(1.0, self._reacquisition_wait_check)
                 return
-            self.iceberg_reacquisition_mode(Waypoints())
+            if self._dist_to_last_wpt() < self.reacquisition_proximity_radius:
+                self._reacquisition_wait_timer.cancel()
+                self.iceberg_reacquisition_mode(Waypoints())
 
     # ------------------------------------------------------------------ #
     #  Helm state polling                                                  #
@@ -576,7 +572,7 @@ class Wp_Admin(Node):
 
 def main():
     rclpy.init()
-    node = Wp_Admin()
+    node = WpAdmin()
     rclpy.spin(node)
     rclpy.shutdown()
 
