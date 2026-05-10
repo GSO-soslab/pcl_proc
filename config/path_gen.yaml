@@ -8,7 +8,7 @@
     costmap_method: 'custom' #nav2 or custom
     path_topic: 'path'
     debug: false
-    minimum_depth_for_path: -2.0
+    minimum_depth_for_path: -1.0
     canny_min_threshold: 200
     canny_max_threshold: 255
 

@@ -226,7 +226,7 @@ class WpAdmin(Node):
         pt.point.y = msg.y
         pt_in_base = tf2_geometry_msgs.do_transform_point(pt, self.odom_to_base_tf)
 
-        far_enough = math.hypot(vx - msg.x, vy - msg.y) > 5.0
+        far_enough = math.hypot(vx - msg.x, vy - msg.y) > self.reacquisition_proximity_radius
         ahead = pt_in_base.point.x > 0
 
         if far_enough and ahead:
@@ -488,7 +488,7 @@ class WpAdmin(Node):
         self.state = "mapping"
 
     def iceberg_reacquisition_mode(self, wpts):
-        """Publish a reacquisition arc and hold for 5 s."""
+        """Publish a reacquisition arc and hold for 5 s, then poll until within reacquisition_proximity_radius of last waypoint."""
         self._transition(Mode.REACQUISITION)
 
         point_of_obstacle = [self.reacquisition_s_param * self.standoff_distance_in_meters,
@@ -531,7 +531,7 @@ class WpAdmin(Node):
             self._reacquisition_wait_timer = self.create_timer(1.0, self._reacquisition_wait_check)
 
     def _reacquisition_wait_check(self):
-        """Poll at 1 Hz after hold expires; re-trigger arc when within 6 m of last waypoint."""
+        """Poll at 1 Hz after hold expires; re-trigger arc when within reacquisition_proximity_radius of last waypoint."""
         if self.mode != Mode.REACQUISITION:
             self._reacquisition_wait_timer.cancel()
             return
