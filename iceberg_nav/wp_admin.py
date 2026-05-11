@@ -102,7 +102,7 @@ class WpAdmin(Node):
         self.create_subscription(Path, path_topic, self.path_cb, 1)
         self.create_subscription(Float32, path_topic + '/distance_to_obstacle', self.distance_cb, 1)
         self.create_subscription(Point, path_topic + "/best_point", self.point_cb, 1)
-        self.create_subscription(Int16, path_topic + "/surge", self.surge_cb, 1)
+        # self.create_subscription(Int16, path_topic + "/surge", self.surge_cb, 1)
 
         # Declare services
         self.get_state_service_client = self.create_client(GetState, self.get_state_service_name)
@@ -211,8 +211,8 @@ class WpAdmin(Node):
     #  Sensor callbacks                                                    #
     # ------------------------------------------------------------------ #
 
-    def surge_cb(self, msg):
-        self.plan_depth = (msg.data == 1)
+    # def surge_cb(self, msg):
+    #     self.plan_depth = (msg.data == 1)
 
     def point_cb(self, msg):
         """Best point callback."""
