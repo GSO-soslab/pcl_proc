@@ -27,6 +27,7 @@
 
     exit_mode_surge: 0.8 #m/s
     exit_mode_distance: 20.0 #m
+    exit_mode_depth: -15.0 #m
 
     reacquisition_s_param: 1.0
     reacquisition_surge: 0.5 #m/s

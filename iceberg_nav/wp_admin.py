@@ -76,9 +76,11 @@ class WpAdmin(Node):
         self.declare_parameter('reacquisition_surge', Parameter.Type.DOUBLE)
         self.declare_parameter('search_mode_surge', Parameter.Type.DOUBLE)
         self.declare_parameter('exit_mode_surge', Parameter.Type.DOUBLE)
+        self.declare_parameter('exit_mode_depth', Parameter.Type.DOUBLE)
 
         # Read parameters
         self.search_mode_depth = self.get_parameter('search_mode_depth').get_parameter_value().double_value
+        self.exit_mode_depth = self.get_parameter('exit_mode_depth').get_parameter_value().double_value
         self.search_mode_initial_radius = self.get_parameter('search_mode_initial_radius').get_parameter_value().double_value
         self.search_mode_max_circles = self.get_parameter('search_mode_max_circles').get_parameter_value().integer_value
 
@@ -413,7 +415,7 @@ class WpAdmin(Node):
         exit_msg = Point()
         exit_msg.x = exit_point_odom.point.x
         exit_msg.y = exit_point_odom.point.y
-        exit_msg.z = 0.0
+        exit_msg.z = self.exit_mode_depth
 
         wpt = Waypoint()
         wpt.header = self.header
