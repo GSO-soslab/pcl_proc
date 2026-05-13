@@ -145,6 +145,8 @@ def calculate_slope(x_coords:list, y_coords:list):
     elif s_xx < s_yy:
         beta_1 = s_xy/s_yy
         beta_0 = np.mean(x_coords) - beta_1*np.mean(y_coords)
+        if beta_1 == 0:
+            return float('inf'), float('nan')
         #Get it in relative to x
         beta_0 = beta_0/beta_1
         beta_1 = 1/beta_1
@@ -152,8 +154,8 @@ def calculate_slope(x_coords:list, y_coords:list):
         return beta_1, beta_0
 
 
-def draw_arc(number_of_points, start_angle, end_angle, center, radius, transform):
-    """Create an arc in vehicle frame and transform to odom."""
+def draw_arc(number_of_points, start_angle, end_angle, center, radius, transform=None):
+    """Create an arc and optionally transform each point. If transform is None, points are returned as-is."""
     angles = np.linspace(start_angle, end_angle, number_of_points)
     points = [(center[0] + radius * math.cos(a),
                center[1] + radius * math.sin(a)) for a in angles]
@@ -162,7 +164,9 @@ def draw_arc(number_of_points, start_angle, end_angle, center, radius, transform
         pt = PointStamped()
         pt.point.x = p[0]
         pt.point.y = p[1]
-        result.append(tf2_geometry_msgs.do_transform_point(pt, transform))
+        if transform is not None:
+            pt = tf2_geometry_msgs.do_transform_point(pt, transform)
+        result.append(pt)
     return result
 
 def sum_angles_radians(*angles):

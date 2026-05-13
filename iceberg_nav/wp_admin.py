@@ -7,10 +7,11 @@
 
 #ros2 bag record /alpha_rise/path/state /alpha_rise/path/distance_to_obstacle /alpha_rise/odometry/filtered/local /alpha_rise/path /alpha_rise/fls/pointcloud
 import rclpy
+import rclpy.time
 from rclpy.parameter import Parameter
 from rclpy.node import Node
 from nav_msgs.msg import Path
-from geometry_msgs.msg import PointStamped, Point
+from geometry_msgs.msg import PointStamped, Point, TransformStamped
 from std_msgs.msg import Float32, Int16
 from std_srvs.srv import SetBool
 import math
@@ -20,6 +21,7 @@ from mvp_msgs.msg import Waypoints, Waypoint
 import time
 import tf2_ros
 import tf2_geometry_msgs
+from tf_transformations import quaternion_from_euler
 from enum import Enum
 
 
@@ -42,6 +44,7 @@ class WpAdmin(Node):
         self.declare_parameter('odom_frame', Parameter.Type.STRING)
         self.declare_parameter('base_frame', Parameter.Type.STRING)
         self.declare_parameter('line_frame', Parameter.Type.STRING)
+        self.declare_parameter('edge_frame', Parameter.Type.STRING)
         self.declare_parameter("stand_off_distance", Parameter.Type.DOUBLE)
         self.declare_parameter('update_waypoint_topic', Parameter.Type.STRING)
         self.declare_parameter('path_topic', Parameter.Type.STRING)
@@ -56,6 +59,7 @@ class WpAdmin(Node):
         self.odom_frame = self.get_parameter('odom_frame').get_parameter_value().string_value
         self.base_frame = self.get_parameter('base_frame').get_parameter_value().string_value
         self.line_frame = self.get_parameter('line_frame').get_parameter_value().string_value
+        self.edge_frame = self.get_parameter('edge_frame').get_parameter_value().string_value
         self.standoff_distance_in_meters = self.get_parameter("stand_off_distance").get_parameter_value().double_value
         update_waypoint_topic = self.get_parameter('update_waypoint_topic').get_parameter_value().string_value
         path_topic = self.get_parameter('path_topic').get_parameter_value().string_value
@@ -74,6 +78,7 @@ class WpAdmin(Node):
         self.declare_parameter('exit_mode_distance',Parameter.Type.DOUBLE)
         self.declare_parameter('follow_mode_surge', Parameter.Type.DOUBLE)
         self.declare_parameter('reacquisition_surge', Parameter.Type.DOUBLE)
+        self.declare_parameter('reacquisition_end_angle', Parameter.Type.DOUBLE)
         self.declare_parameter('search_mode_surge', Parameter.Type.DOUBLE)
         self.declare_parameter('exit_mode_surge', Parameter.Type.DOUBLE)
         self.declare_parameter('exit_mode_depth', Parameter.Type.DOUBLE)
@@ -93,6 +98,7 @@ class WpAdmin(Node):
         # Surge Params
         self.follow_mode_surge = self.get_parameter('follow_mode_surge').get_parameter_value().double_value
         self.reacquisition_surge = self.get_parameter('reacquisition_surge').get_parameter_value().double_value
+        self.reacquisition_end_angle = math.radians(self.get_parameter('reacquisition_end_angle').get_parameter_value().double_value)
         self.exit_mode_surge = self.get_parameter('exit_mode_surge').get_parameter_value().double_value
         self.search_mode_surge = self.get_parameter('search_mode_surge').get_parameter_value().double_value
 
@@ -133,11 +139,13 @@ class WpAdmin(Node):
         self.x, self.y = 0.0, 0.0
         self.valid_best_point = False
         self.last_wpt_odom = None
+        self.last_path_poses = []
         self.plan_depth = False
 
         # TF
         self.tf_buffer = tf2_ros.Buffer()
         self.listener = tf2_ros.TransformListener(self.tf_buffer, self)
+        self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
         self.base_to_odom_tf = None
         self.odom_to_base_tf = None
 
@@ -304,6 +312,7 @@ class WpAdmin(Node):
 
     def _handle_full_path(self, msg, wpts):
         """Full costmap path available."""
+        self.last_path_poses = msg.poses
         self.farthest_sector_pose = None
         max_x = float('-inf')
         for pose_stamped in msg.poses:
@@ -315,7 +324,9 @@ class WpAdmin(Node):
         valid_farthest_point = self.farthest_sector_pose is not None
 
         if self.state == "mapping":
-            if self.valid_best_point:
+            if self._dist_to_last_wpt() < self.reacquisition_proximity_radius:
+                self.iceberg_reacquisition_mode(wpts)
+            elif self.valid_best_point:
                 if self.follow_mode_start_time is None:
                     self.follow_mode_start_time = time.time()
                 elapsed = time.time() - self.follow_mode_start_time
@@ -327,9 +338,6 @@ class WpAdmin(Node):
                     self._publish_follow_waypoints(msg, wpts, valid_farthest_point)
                 else:
                     self.exit_mode(wpts, info=f"Follow timer expired at {self.follow_mode_timer_param}s.")
-
-            elif self._dist_to_last_wpt() < self.reacquisition_proximity_radius:
-                self.iceberg_reacquisition_mode(wpts)
 
     def _handle_no_path(self, wpts):
         """No costmap — short path."""
@@ -365,6 +373,19 @@ class WpAdmin(Node):
             wpts.wpt.append(wpt)
 
         self.last_wpt_odom = (wpts.wpt[-1].wpt.x, wpts.wpt[-1].wpt.y)
+        if valid_farthest_point:
+            trend_angle_odom = math.atan2(self.farthest_sector_pose.pose.position.y - self.y, 
+                            self.farthest_sector_pose.pose.position.x - self.x)
+            safety_wpt = Waypoint()
+            safety_wpt.header = msg.header
+            safety_wpt.u = self.follow_mode_surge
+            safety_pt = Point()
+            safety_pt.x = self.farthest_sector_pose.pose.position.x + self.standoff_distance_in_meters * math.cos(trend_angle_odom + math.pi/2)
+            safety_pt.y = self.farthest_sector_pose.pose.position.y + self.standoff_distance_in_meters * math.sin(trend_angle_odom + math.pi/2)
+            safety_pt.z = self.depth
+            safety_wpt.wpt = safety_pt
+            wpts.wpt.append(safety_wpt)
+
         self.pub_update.publish(wpts)
 
     # ------------------------------------------------------------------ #
@@ -493,15 +514,90 @@ class WpAdmin(Node):
         """Publish a reacquisition arc and hold for 5 s, then poll until within reacquisition_proximity_radius of last waypoint."""
         self._transition(Mode.REACQUISITION)
 
-        point_of_obstacle = [self.reacquisition_s_param * self.standoff_distance_in_meters,
-                              -self.standoff_distance_in_meters]
-        corner_bhvr_points = draw_arc(
-            number_of_points=8,
-            start_angle=math.pi / 2,
-            end_angle=0,
-            center=point_of_obstacle,
-            radius=self.standoff_distance_in_meters,
-            transform=self.base_to_odom_tf)
+        age_sec = float('inf')
+        try:
+            self.edge_frame_to_odom_tf = self.tf_buffer.lookup_transform(
+                self.odom_frame, self.edge_frame, rclpy.time.Time())
+            stamp = self.edge_frame_to_odom_tf.header.stamp
+            age_sec = self.get_clock().now().nanoseconds / 1e9 - (stamp.sec + stamp.nanosec / 1e9)
+        except Exception as e:
+            self.get_logger().warn(f"edge_frame TF unavailable: {e}", throttle_duration_sec=5)
+
+        farthest_is_ahead = False
+        if self.farthest_sector_pose is not None and self.odom_to_base_tf is not None:
+            far_pt = PointStamped()
+            far_pt.point = self.farthest_sector_pose.pose.position
+            best_pt = PointStamped()
+            best_pt.point.x = self.x
+            best_pt.point.y = self.y
+            far_bl = tf2_geometry_msgs.do_transform_point(far_pt, self.odom_to_base_tf)
+            best_bl = tf2_geometry_msgs.do_transform_point(best_pt, self.odom_to_base_tf)
+            farthest_is_ahead = far_bl.point.x > best_bl.point.x
+
+        if age_sec <= 1.0 and farthest_is_ahead:
+            #in odom
+            trend_angle = math.atan2(
+                self.farthest_sector_pose.pose.position.y - self.y,
+                self.farthest_sector_pose.pose.position.x - self.x)
+
+            # first arc point: farthest extended along trend
+            # [px;py] = [w2.x; w2.y] + [c(angle), -s(angle); s(angle), c(angle)] * [s_param*standoff; 0]
+            px = self.farthest_sector_pose.pose.position.x + self.reacquisition_s_param * self.standoff_distance_in_meters * math.cos(trend_angle)
+            py = self.farthest_sector_pose.pose.position.y + self.reacquisition_s_param * self.standoff_distance_in_meters * math.sin(trend_angle)
+
+            # find center of arc in P frame (P: x=forward/trend, y=left; right-turn center is -y)
+            center_in_p = [0.0, -self.standoff_distance_in_meters]
+
+            quat_of_trend_angle = quaternion_from_euler(0, 0, trend_angle)
+            # Publish P frame as TF (x-axis along trend_angle)
+            p_to_odom = TransformStamped()
+            p_to_odom.header.frame_id = self.odom_frame
+            p_to_odom.header.stamp = self.get_clock().now().to_msg()
+            p_to_odom.child_frame_id = "alpha_rise/reacquisition_P"
+            p_to_odom.transform.translation.x = px
+            p_to_odom.transform.translation.y = py
+            p_to_odom.transform.translation.z = 0.0
+            p_to_odom.transform.rotation.x = quat_of_trend_angle[0]
+            p_to_odom.transform.rotation.y = quat_of_trend_angle[1]
+            p_to_odom.transform.rotation.z = quat_of_trend_angle[2]
+            p_to_odom.transform.rotation.w = quat_of_trend_angle[3]
+            self.tf_broadcaster.sendTransform(p_to_odom)
+
+            corner_bhvr_points = draw_arc(
+                number_of_points=8,
+                start_angle=math.pi / 2,
+                end_angle=self.reacquisition_end_angle,
+                center=center_in_p,
+                radius=self.standoff_distance_in_meters,
+                transform=p_to_odom)
+
+
+            # # center is one radius to the right of travel (clockwise turn)
+            # center_x = px + self.standoff_distance_in_meters * math.sin(trend_angle)
+            # center_y = py - self.standoff_distance_in_meters * math.cos(trend_angle)
+
+            # corner_bhvr_points = draw_arc(
+            #     number_of_points=8,
+            #     start_angle=trend_angle + math.pi / 2,
+            #     end_angle=trend_angle,
+            #     center=[center_x, center_y],
+            #     radius=self.standoff_distance_in_meters,
+            #     transform=None)
+        else:
+            elapsed = time.time() - self.follow_mode_start_time
+            if elapsed >= self.follow_mode_timer_param:
+                self.exit_mode(wpts, info=f"Follow timer expired during reacquisition at {self.follow_mode_timer_param}s.")
+                return
+            self.get_logger().warn(f"edge_frame TF stale ({age_sec:.1f}s) — falling back to base_link arc", throttle_duration_sec=5)
+            center = [self.reacquisition_s_param * self.standoff_distance_in_meters,
+                                  -self.standoff_distance_in_meters]
+            corner_bhvr_points = draw_arc(
+                number_of_points=8,
+                start_angle=math.pi / 2,
+                end_angle=self.reacquisition_end_angle,
+                center=center,
+                radius=self.standoff_distance_in_meters,
+                transform=self.base_to_odom_tf)
 
         for pt in corner_bhvr_points:
             wpt = Waypoint()
@@ -519,7 +615,9 @@ class WpAdmin(Node):
 
         self.get_logger().info("Iceberg Reacquisition Mode", throttle_duration_sec=3)
         self.pub_update.publish(wpts)
-        self._reacquisition_timer = self.create_timer(5.0, self._reacquisition_hold_done)
+        if hasattr(self, '_reacquisition_timer') and not self._reacquisition_timer.is_canceled():
+            self._reacquisition_timer.cancel()
+        self._reacquisition_timer = self.create_timer(3.0, self._reacquisition_hold_done)
 
     def _reacquisition_hold_done(self):
         self._reacquisition_timer.cancel()
